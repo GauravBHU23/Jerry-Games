@@ -24,6 +24,11 @@ module.exports = async (req, res) => {
 
   try {
     if (req.method === 'GET') {
+      // ?check=NAME asks whether a name is still free, without creating anyone
+      const check = req.query && req.query.check;
+      if (check) {
+        return res.status(200).json({ taken: await backend.nameTaken(check) });
+      }
       const id = (req.query && req.query.id) || '';
       if (!id) return res.status(400).json({ error: 'id required' });
       const profile = await playerProfile(id);
@@ -43,6 +48,8 @@ module.exports = async (req, res) => {
 
     res.status(405).json({ error: 'method not allowed' });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    // 409 so the client can tell "name taken" apart from a real failure
+    const code = e.code === 'NAME_TAKEN' ? 409 : 500;
+    res.status(code).json({ error: e.message, code: e.code });
   }
 };

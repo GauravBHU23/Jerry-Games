@@ -738,7 +738,14 @@ const store = {
 
 async function apiJson(url, opts) {
   const res = await fetch(url, opts);
-  if (!res.ok) throw new Error('HTTP ' + res.status);
+  if (!res.ok) {
+    // keep the status and any server message so callers can react to 409
+    let msg = 'HTTP ' + res.status;
+    try { const b = await res.json(); if (b && b.error) msg = b.error; } catch (e) {}
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
   return res.json();
 }
 
@@ -791,11 +798,22 @@ async function registerPlayer(name) {
     });
     applyProfile(p);
     store.set(ID_KEY, p.id);
+    store.set(NAME_KEY, p.name);
     profile.returning = false;
     return true;
   } catch (e) {
+    // The server said this name belongs to someone else - that is a real
+    // answer, not an outage, so surface it instead of playing on locally.
+    if (e.status === 409) throw e;
+
     // No server (static hosting or it is down): keep playing locally, and
     // remember the name so a reload still recognises them.
+    // Locally we can still stop an obvious duplicate.
+    if (localNameTaken(clean)) {
+      const err = new Error('That name is already used on this device.');
+      err.status = 409;
+      throw err;
+    }
     profile.id = store.get(ID_KEY) || 'local_' + Math.random().toString(36).slice(2, 10);
     store.set(ID_KEY, profile.id);
     store.set(NAME_KEY, clean);
@@ -805,6 +823,14 @@ async function registerPlayer(name) {
     applyLocalStats();
     return false;
   }
+}
+
+// Offline duplicate check: has this browser already recorded runs under that
+// name for a different player id?
+function localNameTaken(name) {
+  const nm = String(name || '').trim().toUpperCase();
+  return loadLocalRuns().some(r =>
+    String(r.name || '').toUpperCase() === nm && r.id !== profile.id);
 }
 
 // Rebuilds profile numbers from the runs saved in this browser.
@@ -1070,11 +1096,33 @@ function showNameError(msg) {
   nameInput.classList.toggle('invalid', !!msg);
 }
 
-// Live feedback: enable the button only once the name is usable.
+// Live feedback: enable the button only once the name is usable, then ask the
+// server whether it is still free.
+let nameCheckTimer = null;
+let nameCheckSeq = 0;
+
 function refreshNameState() {
   const bad = nameError(nameInput.value);
   nameGo.disabled = !!bad;
-  if (!bad) showNameError('');
+  if (bad) { showNameError(''); return; }
+  showNameError('');
+
+  // debounce so we are not asking on every keystroke
+  clearTimeout(nameCheckTimer);
+  const seq = ++nameCheckSeq;
+  const want = nameInput.value.trim().toUpperCase().slice(0, 12);
+  nameCheckTimer = setTimeout(async () => {
+    // keeping your own name is always fine
+    if (profile.name && want === profile.name.toUpperCase()) return;
+    try {
+      const r = await apiJson(`${API}/player?check=${encodeURIComponent(want)}`);
+      if (seq !== nameCheckSeq) return;              // a newer keystroke won
+      if (r.taken) {
+        showNameError('That name is taken - try another');
+        nameGo.disabled = true;
+      }
+    } catch (e) { /* offline: the submit path still checks */ }
+  }, 350);
 }
 
 async function confirmName() {
@@ -1088,7 +1136,18 @@ async function confirmName() {
   const v = raw.trim().toUpperCase().slice(0, 12);
   nameGo.disabled = true;
   nameGo.textContent = 'SAVING...';
-  await registerPlayer(v);
+  try {
+    await registerPlayer(v);
+  } catch (e) {
+    // taken, or some other refusal - stay on the dialog and say why
+    nameGo.disabled = false;
+    nameGo.textContent = 'START GAME';
+    showNameError(e.status === 409 ? 'That name is taken - try another'
+                                   : 'Could not save that name, try again');
+    nameInput.focus();
+    nameInput.select();
+    return;
+  }
   nameGo.disabled = false;
   nameGo.textContent = 'START GAME';
   closeNameOverlay();

@@ -90,6 +90,9 @@ const server = http.createServer(async (req, res) => {
 
     // both shapes work: /api/player?id=x (what Vercel needs) and /api/player/x
     if (pathname === '/api/player' && req.method === 'GET') {
+      // ?check=NAME asks whether a name is free, without creating anyone
+      const check = url.searchParams.get('check');
+      if (check) return sendJson(res, 200, { taken: await backend.nameTaken(check) });
       const id = url.searchParams.get('id') || '';
       if (!id) return sendJson(res, 400, { error: 'id required' });
       const profile = await playerProfile(id);
@@ -154,7 +157,9 @@ const server = http.createServer(async (req, res) => {
     fs.createReadStream(filePath).pipe(res);
 
   } catch (err) {
-    sendJson(res, 500, { error: err.message });
+    // 409 so the client can tell "name taken" apart from a real failure
+    const code = err.code === 'NAME_TAKEN' ? 409 : 500;
+    sendJson(res, code, { error: err.message, code: err.code });
   }
 });
 
