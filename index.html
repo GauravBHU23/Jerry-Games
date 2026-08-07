@@ -151,6 +151,41 @@
   #nameClose:hover { color: #fff; border-color: #4af; background: rgba(74,175,255,0.25); }
   #nameClose:active { transform: scale(0.92); }
 
+  /* ===== navigation ===== */
+  #backBtn, #pauseBtn {
+    position: absolute;
+    display: none;
+    font-family: inherit;
+    font-weight: bold;
+    color: #cfe9ff;
+    background: rgba(10, 30, 55, 0.85);
+    border: 2px solid #4af;
+    cursor: pointer;
+    z-index: 22;
+    line-height: 1;
+    transition: transform .06s, background .12s;
+  }
+  #backBtn {
+    left: 8px; top: 8px;
+    padding: 7px 12px;
+    font-size: 12px;
+    border-radius: 16px;
+  }
+  #pauseBtn {
+    right: 8px; bottom: 8px;
+    width: 40px; height: 40px;
+    font-size: 13px;
+    border-radius: 50%;
+    align-items: center; justify-content: center;
+  }
+  #backBtn:hover, #pauseBtn:hover { background: rgba(74,175,255,0.35); color: #fff; }
+  #backBtn:active, #pauseBtn:active { transform: scale(0.93); }
+  /* landscape phones: keep these clear of the thumb controls */
+  @media (orientation: landscape) and (max-height: 500px) {
+    #backBtn { padding: 5px 10px; font-size: 11px; }
+    #pauseBtn { width: 34px; height: 34px; font-size: 11px; right: 8px; bottom: auto; top: 8px; }
+  }
+
   /* lets a second person on the same device claim their own id */
   #switchPlayer {
     position: absolute;
@@ -310,6 +345,8 @@
     </div>
   </div>
 
+  <button id="backBtn" type="button" title="Back (Esc)">◀ BACK</button>
+  <button id="pauseBtn" type="button" title="Pause (Esc / P)">❚❚</button>
   <div id="switchPlayer" role="button" tabindex="0" title="Play as someone else">👤 Not you?</div>
   <button id="installBtn" type="button" title="Install this game">⬇ Install</button>
   <div id="toast" role="status" aria-live="polite"></div>
@@ -319,7 +356,8 @@
   <kbd>SPACE</kbd> / <kbd>W</kbd> / <kbd>↑</kbd> jump &nbsp;•&nbsp;
   <kbd>X</kbd> water bomb &nbsp;•&nbsp;
   <kbd>R</kbd> restart &nbsp;•&nbsp;
-  <kbd>M</kbd> mute
+  <kbd>M</kbd> mute &nbsp;•&nbsp;
+  <kbd>ESC</kbd> pause / back
 </div>
 
 <div id="touch">
@@ -439,6 +477,7 @@ document.querySelectorAll('#touch .btn').forEach(btn => {
 let tapConfirm = false;
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
+  if (paused) return;      // the pause menu handles its own taps
   tapConfirm = true;
 });
 // Block double-tap zoom / long-press menus over the play area.
@@ -1219,6 +1258,9 @@ let comboBest = 0;
 let floatText = [];        // little "+250 x3" numbers that rise and fade
 let checkpoints = [];      // flags through the level
 let checkpointX = 60;      // where a death sends you back to
+let paused = false;        // pause overlay during a run
+let pauseSel = 0;          // which pause menu row is highlighted
+let pausedAt = 0;          // when the pause began, so it can be discounted
 let powerBanner = null;    // {text, timer} shown when a new power unlocks
 let score = 0;
 let lives = 3;
@@ -3576,6 +3618,7 @@ function fullReset() {
   powerBanner = null;
   combo = 0; comboTimer = 0; comboBest = 0;
   floatText = [];
+  paused = false; pausedAt = 0; pauseSel = 0;
   buildLevel(level);
 }
 
@@ -3612,8 +3655,12 @@ function draw() {
   ctx.save();
   ctx.translate(VIEW_X, 0);
   drawHUD();
-  if (popup) drawPopup();
-  drawLevelBanner();
+  // banners and popups would print over the pause overlay, and their timers
+  // should not tick down while the game is stopped
+  if (!paused) {
+    if (popup) drawPopup();
+    drawLevelBanner();
+  }
   ctx.restore();
 }
 
@@ -3624,6 +3671,148 @@ function centred(drawFn) {
   ctx.translate(VIEW_X, 0);
   drawFn();
   ctx.restore();
+}
+
+// ============ NAVIGATION ============
+// Esc / P pause a run; Esc backs out of any other screen. The on-screen
+// buttons do the same thing so touch players have the same options.
+const backBtn = document.getElementById('backBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+
+const PAUSE_ITEMS = ['RESUME', 'RESTART LEVEL', 'LEADERBOARD', 'QUIT TO MENU'];
+
+function inRun() { return gameState === 'playing' || gameState === 'villain'; }
+
+function setPaused(on) {
+  if (!inRun()) return;
+  if (on === paused) return;
+  if (on) {
+    pauseSel = 0;
+    pausedAt = Date.now();
+  } else if (pausedAt) {
+    // Don't let paused time count towards the run - it decides score ties.
+    runStartedAt += Date.now() - pausedAt;
+    pausedAt = 0;
+  }
+  paused = on;
+}
+
+// "Back" means something different on each screen.
+function goBack() {
+  if (askingName) { cancelName(); return; }
+  if (inRun()) { setPaused(!paused); return; }
+  if (gameState === 'board') { gameState = 'menu'; return; }
+  if (gameState === 'win' || gameState === 'gameover') { gameState = 'board'; return; }
+}
+
+function choosePauseItem() {
+  const item = PAUSE_ITEMS[pauseSel];
+  if (item === 'RESUME') {
+    setPaused(false);
+  } else if (item === 'RESTART LEVEL') {
+    setPaused(false);
+    const n = level;
+    buildLevel(n);
+    gameState = 'playing';
+    villain = null;
+    bossActiveEnemies = [];
+    villainShots = [];
+    bombs = [];
+    jerry.x = checkpointX; jerry.y = 260;
+    jerry.vx = 0; jerry.vy = 0; jerry.jumps = 0;
+    jerry.invuln = 120;
+    camera.x = 0;
+    breakCombo();
+    levelBanner = 120;
+  } else if (item === 'LEADERBOARD') {
+    setPaused(false);
+    recordRun();          // quitting mid-run still counts what you scored
+    gameState = 'board';
+  } else if (item === 'QUIT TO MENU') {
+    setPaused(false);
+    recordRun();
+    gameState = 'menu';
+  }
+}
+
+if (backBtn) {
+  backBtn.addEventListener('click', e => { e.stopPropagation(); goBack(); });
+  backBtn.addEventListener('pointerdown', e => e.stopPropagation());
+}
+if (pauseBtn) {
+  pauseBtn.addEventListener('click', e => { e.stopPropagation(); setPaused(!paused); });
+  pauseBtn.addEventListener('pointerdown', e => e.stopPropagation());
+}
+
+window.addEventListener('keydown', e => {
+  if (askingName) return;                 // the dialog handles its own keys
+  const k = e.key.toLowerCase();
+  if (k === 'escape') { e.preventDefault(); goBack(); return; }
+  if (k === 'p' && inRun()) { e.preventDefault(); setPaused(!paused); return; }
+  if (!paused) return;
+
+  // pause menu navigation
+  if (k === 'arrowup' || k === 'w') {
+    e.preventDefault();
+    pauseSel = (pauseSel + PAUSE_ITEMS.length - 1) % PAUSE_ITEMS.length;
+  } else if (k === 'arrowdown' || k === 's') {
+    e.preventDefault();
+    pauseSel = (pauseSel + 1) % PAUSE_ITEMS.length;
+  } else if (k === 'enter' || k === ' ') {
+    e.preventDefault();
+    choosePauseItem();
+  }
+});
+
+// Tapping a pause menu row picks it.
+canvas.addEventListener('pointerdown', e => {
+  if (!paused) return;
+  const r = canvas.getBoundingClientRect();
+  // screen pixels -> game units, then undo the centring offset
+  const gx = (e.clientX - r.left) / r.width * VIEW_W - VIEW_X;
+  const gy = (e.clientY - r.top) / r.height * H;
+  PAUSE_ITEMS.forEach((_, i) => {
+    const y = 232 + i * 42;
+    if (gx > W / 2 - 150 && gx < W / 2 + 150 && gy > y - 24 && gy < y + 12) {
+      pauseSel = i;
+      choosePauseItem();
+    }
+  });
+}, true);
+
+function drawPauseMenu() {
+  ctx.fillStyle = 'rgba(2, 12, 26, 0.86)';
+  ctx.fillRect(-VIEW_X - 2, 0, VIEW_W + 4, H);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#4af';
+  ctx.font = 'bold 30px monospace';
+  ctx.fillText('PAUSED', W / 2, 150);
+
+  ctx.fillStyle = '#7e9fbb';
+  ctx.font = '11px monospace';
+  ctx.fillText('LEVEL ' + level + '  ·  SCORE ' + score + '  ·  ' + fmtTime(
+    runStartedAt ? Date.now() - runStartedAt : 0), W / 2, 176);
+
+  PAUSE_ITEMS.forEach((item, i) => {
+    const y = 232 + i * 42;
+    const on = i === pauseSel;
+    ctx.fillStyle = on ? 'rgba(74,175,255,0.22)' : 'rgba(255,255,255,0.05)';
+    ctx.fillRect(W / 2 - 150, y - 24, 300, 34);
+    ctx.strokeStyle = on ? '#4af' : 'rgba(120,150,180,0.35)';
+    ctx.lineWidth = on ? 2 : 1;
+    ctx.strokeRect(W / 2 - 150, y - 24, 300, 34);
+    ctx.fillStyle = on ? '#fff' : '#9fbdd6';
+    ctx.font = (on ? 'bold ' : '') + '15px monospace';
+    ctx.fillText(item, W / 2, y);
+  });
+
+  ctx.fillStyle = '#567';
+  ctx.font = '10px monospace';
+  ctx.fillText(isTouch ? 'tap a choice  ·  ❚❚ to resume'
+                       : '↑ ↓ to choose  ·  ENTER to pick  ·  ESC to resume',
+               W / 2, 232 + PAUSE_ITEMS.length * 42 + 18);
+  ctx.textAlign = 'left';
 }
 
 function loop() {
@@ -3647,6 +3836,16 @@ function loop() {
   if (installBtn && installPrompt) {
     installBtn.style.display = onMenu ? 'block' : 'none';
   }
+  // back arrow on every screen except the menu itself; pause only during a run
+  if (backBtn) {
+    backBtn.style.display =
+      (!askingName && gameState !== 'menu' && !paused) ? 'block' : 'none';
+  }
+  if (pauseBtn) {
+    pauseBtn.style.display = (!askingName && inRun()) ? 'flex' : 'none';
+    pauseBtn.textContent = paused ? '▶' : '❚❚';
+    pauseBtn.title = paused ? 'Resume (Esc)' : 'Pause (Esc / P)';
+  }
 
   if (gameState === 'menu') {
     centred(drawMenu);
@@ -3663,11 +3862,13 @@ function loop() {
       gameState = 'menu';
     }
   } else if (gameState === 'playing') {
-    updatePlaying();
+    if (!paused) updatePlaying();
     draw();
+    if (paused) centred(drawPauseMenu);
   } else if (gameState === 'villain') {
-    updateVillain();
+    if (!paused) updateVillain();
     draw();
+    if (paused) centred(drawPauseMenu);
   } else if (gameState === 'gameover') {
     recordRun();
     draw();

@@ -138,8 +138,23 @@ curl http://localhost:3000/api/leaderboard
 | Move | `←` `→` or `A` `D` | ◀ ▶ buttons |
 | Jump | `SPACE` / `W` / `↑` | ▲ button |
 | Water bomb | `X` | BOMB button |
+| Pause | `ESC` or `P` | ❚❚ button |
+| Back | `ESC` | ◀ BACK button |
 | Restart | `R` | tap the screen |
 | Mute | `M` | 🔊 button |
+
+### Getting around
+
+`ESC` is the universal back key: it pauses a run, and steps back one screen
+everywhere else (leaderboard → menu, win/game-over → leaderboard). The same
+thing is a **◀ BACK** button in the top-left for touch players.
+
+Pausing opens a menu with **Resume**, **Restart level** (drops you at your last
+checkpoint), **Leaderboard** and **Quit to menu**. Use `↑` `↓` and `ENTER`, or
+just tap a row. Quitting part-way still records the score you had.
+
+Time spent paused does not count towards your run time, so pausing can never
+win you a tie-break.
 
 ## Playing without the server
 
