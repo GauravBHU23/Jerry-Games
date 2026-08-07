@@ -833,7 +833,29 @@ function toast(msg, ms) {
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      // A cached old build would otherwise stick around until every tab is
+      // closed. Watch for a new worker and reload as soon as it takes over.
+      reg.addEventListener('updatefound', () => {
+        const fresh = reg.installing;
+        if (!fresh) return;
+        fresh.addEventListener('statechange', () => {
+          if (fresh.state === 'installed' && navigator.serviceWorker.controller) {
+            toast('Update ready - reloading');
+            setTimeout(() => location.reload(), 900);
+          }
+        });
+      });
+      reg.update();
+    }).catch(() => {});
+  });
+
+  // if the worker is replaced, pick up the new version once
+  let swReloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (swReloaded) return;
+    swReloaded = true;
+    location.reload();
   });
 }
 
