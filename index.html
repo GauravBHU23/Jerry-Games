@@ -3214,6 +3214,51 @@ function levelLabel(n) {
   return v > FINAL_LEVEL ? 'Final Boss' : 'Level ' + Math.min(v, FINAL_LEVEL);
 }
 
+// A circular badge with the player's initial. The colour is derived from the
+// name, so the same person always gets the same one.
+const AVATAR_COLOURS = [
+  ['#2f6fd0', '#8cc4ff'], ['#1f9a76', '#7ff0cd'], ['#b8543f', '#ffb59f'],
+  ['#7a4fc0', '#d0b6ff'], ['#b8892a', '#ffd98a'], ['#2b8fa8', '#95e6f7'],
+  ['#a83f74', '#ffa7cf'], ['#4a7a2a', '#c1f08c'],
+];
+
+function avatarColour(name) {
+  let h = 0;
+  const s = String(name || '?');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_COLOURS[h % AVATAR_COLOURS.length];
+}
+
+// First letter or digit of the name; falls back to '?' for odd input.
+function avatarInitial(name) {
+  const m = String(name || '').match(/[a-z0-9]/i);
+  return m ? m[0].toUpperCase() : '?';
+}
+
+function drawAvatar(cx, cy, r, name, highlight) {
+  const [bg, fg] = avatarColour(name);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = bg;
+  ctx.fill();
+  ctx.lineWidth = highlight ? 2 : 1.5;
+  ctx.strokeStyle = highlight ? '#fff' : 'rgba(255,255,255,0.35)';
+  ctx.stroke();
+  // subtle top highlight so it reads as a badge, not a flat dot
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.28, cy - r * 0.32, r * 0.34, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.fill();
+
+  ctx.fillStyle = fg;
+  ctx.font = 'bold ' + Math.round(r * 1.5) + 'px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(avatarInitial(name), cx, cy + r * 0.08);
+  ctx.restore();
+}
+
 function drawLeaderboard() {
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, '#04182f');
@@ -3249,17 +3294,19 @@ function drawLeaderboard() {
   ctx.strokeRect(40, cardY, W - 80, 56);
 
   ctx.textAlign = 'left';
+  // your own badge, larger than the ones in the table
+  drawAvatar(74, cardY + 28, 17, profile.name, true);
   ctx.fillStyle = '#4af';
   ctx.font = 'bold 15px monospace';
-  ctx.fillText(profile.name || 'PLAYER', 56, cardY + 21);
+  ctx.fillText(profile.name || 'PLAYER', 100, cardY + 21);
   ctx.fillStyle = '#cfe9ff';
   ctx.font = '12px monospace';
-  ctx.fillText('BEST ' + profile.bestScore, 56, cardY + 41);
-  ctx.fillText('GAMES ' + profile.gamesPlayed, 176, cardY + 41);
-  ctx.fillText('REACHED ' + levelLabel(profile.bestLevel), 286, cardY + 41);
+  ctx.fillText('BEST ' + profile.bestScore, 100, cardY + 41);
+  ctx.fillText('GAMES ' + profile.gamesPlayed, 216, cardY + 41);
+  ctx.fillText('REACHED ' + levelLabel(profile.bestLevel), 326, cardY + 41);
   if (profile.bestTimeMs) {
     ctx.fillStyle = '#9fd';
-    ctx.fillText('TIME ' + fmtTime(profile.bestTimeMs), 448, cardY + 41);
+    ctx.fillText('TIME ' + fmtTime(profile.bestTimeMs), 486, cardY + 41);
   }
   if (profile.rank) {
     // kept clear of the sound button that floats over the top-right corner
@@ -3278,7 +3325,7 @@ function drawLeaderboard() {
   ctx.fillStyle = '#7e9fbb';
   ctx.font = 'bold 10px monospace';
   ctx.fillText('#',      56,  142);
-  ctx.fillText('PLAYER', 88,  142);
+  ctx.fillText('PLAYER', 108, 142);
   ctx.fillText('SCORE',  268, 142);
   ctx.fillText('TIME',   360, 142);
   ctx.fillText('LEVEL',  440, 142);
@@ -3296,6 +3343,7 @@ function drawLeaderboard() {
   }
 
   const MEDAL = ['#ffd94a', '#d8d8d8', '#cd8b4a'];
+  const NAME_X = 108;          // names shift right to make room for the avatar
   rows.forEach((r, i) => {
     const y = 168 + i * 24;
     // offline rows are grouped by name, so match on either
@@ -3309,8 +3357,10 @@ function drawLeaderboard() {
     ctx.font = 'bold 13px monospace';
     ctx.fillStyle = MEDAL[i] || '#7e9fbb';
     ctx.fillText(i < 3 ? ['1', '2', '3'][i] : String(r.rank), 56, y);
+    drawAvatar(88, y - 5, 9, r.name, me);
+    ctx.font = 'bold 13px monospace';
     ctx.fillStyle = me ? '#fff' : '#cfe9ff';
-    ctx.fillText(r.name, 88, y);
+    ctx.fillText(r.name, NAME_X, y);
     ctx.fillStyle = '#fff';
     ctx.fillText(String(r.score), 268, y);
     // the deciding number when scores are level
@@ -3484,6 +3534,8 @@ function drawMenu() {
     ctx.lineWidth = 1;
     ctx.strokeRect(170, cardY, W - 340, cardH);
 
+    drawAvatar(196, cardY + cardH / 2, 14, profile.name, true);
+    ctx.textAlign = 'center';
     ctx.fillStyle = '#ffd94a';
     ctx.font = 'bold 14px monospace';
     ctx.fillText('WELCOME BACK, ' + profile.name + '!', W/2, cardY + 18);
