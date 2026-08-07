@@ -52,6 +52,84 @@
   @media (max-width: 920px) {
     #sound { right: 8px; top: 44px; width: 38px; height: 38px; font-size: 17px; }
   }
+
+  /* ===== name entry ===== */
+  #nameOverlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 12, 30, 0.88);
+    z-index: 30;
+    line-height: normal;
+  }
+  #nameOverlay.show { display: flex; }
+  #nameOverlay .panel {
+    width: min(86%, 380px);
+    background: rgba(6, 26, 50, 0.97);
+    border: 3px solid #4af;
+    border-radius: 6px;
+    padding: 22px 20px;
+    text-align: center;
+    box-shadow: 0 0 40px rgba(74, 175, 255, 0.35);
+  }
+  #nameOverlay h2 {
+    color: #4af; font-size: 15px; letter-spacing: 1px; margin-bottom: 8px;
+  }
+  #nameOverlay p { color: #8bc; font-size: 11px; margin-bottom: 14px; }
+  #nameInput {
+    width: 100%;
+    padding: 11px 12px;
+    font-family: inherit;
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #fff;
+    background: #06182e;
+    border: 2px solid #2a6fa8;
+    border-radius: 4px;
+    outline: none;
+  }
+  #nameInput:focus { border-color: #4af; box-shadow: 0 0 12px rgba(74,175,255,0.5); }
+  #nameGo {
+    margin-top: 14px;
+    width: 100%;
+    padding: 12px;
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    color: #04121f;
+    background: #4af;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background .12s, transform .06s;
+  }
+  #nameGo:hover { background: #6cf; }
+  #nameGo:active { transform: scale(0.97); }
+  #nameHint { margin-top: 9px; color: #567; font-size: 10px; }
+
+  /* lets a second person on the same device claim their own id */
+  #switchPlayer {
+    position: absolute;
+    left: 8px; top: 8px;
+    padding: 5px 9px;
+    font-size: 10px;
+    color: #9cc;
+    background: rgba(10, 30, 55, 0.8);
+    border: 1px solid #35678f;
+    border-radius: 14px;
+    cursor: pointer;
+    z-index: 20;
+    line-height: normal;
+    user-select: none;
+  }
+  #switchPlayer:hover { color: #fff; border-color: #4af; }
+  #switchPlayer:active { transform: scale(0.95); }
   #game {
     display: block;
     width: 100%;
@@ -132,6 +210,19 @@
 <div id="stage">
   <canvas id="game" width="800" height="500"></canvas>
   <div id="sound" role="button" tabindex="0" aria-label="Sound on" title="Sound on/off (M)">🔊</div>
+
+  <div id="nameOverlay">
+    <div class="panel">
+      <h2>◆ ENTER YOUR NAME ◆</h2>
+      <p>Your score will appear on the leaderboard</p>
+      <input id="nameInput" type="text" maxlength="12" placeholder="PLAYER"
+             autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+      <button id="nameGo">START GAME</button>
+      <div id="nameHint">Max 12 characters</div>
+    </div>
+  </div>
+
+  <div id="switchPlayer" role="button" tabindex="0" title="Play as someone else">👤 Not you?</div>
 </div>
 <div id="info">
   <kbd>←</kbd> <kbd>→</kbd> move &nbsp;•&nbsp;
@@ -444,6 +535,205 @@ try {
 } catch (e) {}
 setAudioOn(audio.on);
 
+// ============ PLAYER PROFILE + LEADERBOARD ============
+// Talks to the local API (see server.js), which stores everything as CSV in
+// ./media. If the server is not running the game still plays; scores are then
+// kept in this browser and pushed up the next time the API is reachable.
+const API = '/api';
+
+const profile = {
+  id: null,
+  name: '',
+  gamesPlayed: 0,
+  bestScore: 0,
+  bestLevel: 1,
+  rank: null,
+  totalPlayers: 0,
+  history: [],
+  returning: false,      // true when we recognised a saved id
+};
+
+const leaderboard = { rows: [], status: 'idle' };  // idle|loading|ok|offline
+
+const ID_KEY = 'jerry-player-id';
+const PENDING_KEY = 'jerry-pending-scores';
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+
+async function apiJson(url, opts) {
+  const res = await fetch(url, opts);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+function applyProfile(p) {
+  profile.id = p.id;
+  profile.name = p.name;
+  profile.gamesPlayed = p.gamesPlayed || 0;
+  profile.bestScore = p.bestScore || 0;
+  profile.bestLevel = p.bestLevel || 1;
+  profile.rank = p.rank == null ? null : p.rank;
+  profile.totalPlayers = p.totalPlayers || 0;
+  profile.history = p.history || [];
+  playerName = p.name;
+}
+
+// Look up the saved id so a returning player is greeted by name.
+async function loadSavedPlayer() {
+  const id = store.get(ID_KEY);
+  if (!id) return false;
+  try {
+    const p = await apiJson(`${API}/player/${encodeURIComponent(id)}`);
+    applyProfile(p);
+    profile.returning = true;
+    flushPendingScores();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function registerPlayer(name) {
+  const clean = (name || 'PLAYER').trim().toUpperCase().slice(0, 12) || 'PLAYER';
+  try {
+    const p = await apiJson(`${API}/player`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: clean }),
+    });
+    applyProfile(p);
+    store.set(ID_KEY, p.id);
+    profile.returning = false;
+    return true;
+  } catch (e) {
+    // offline: still let them play under this name
+    profile.id = store.get(ID_KEY) || 'local_' + Math.random().toString(36).slice(2, 10);
+    store.set(ID_KEY, profile.id);
+    profile.name = clean;
+    playerName = clean;
+    return false;
+  }
+}
+
+// Scores recorded while the server was down, retried later.
+function queuePending(entry) {
+  let q = [];
+  try { q = JSON.parse(store.get(PENDING_KEY) || '[]'); } catch (e) {}
+  q.push(entry);
+  store.set(PENDING_KEY, JSON.stringify(q.slice(-50)));
+}
+
+async function flushPendingScores() {
+  let q = [];
+  try { q = JSON.parse(store.get(PENDING_KEY) || '[]'); } catch (e) {}
+  if (!q.length || !profile.id) return;
+  const left = [];
+  for (const e of q) {
+    try {
+      const p = await apiJson(`${API}/score`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: profile.id, score: e.score, level: e.level }),
+      });
+      applyProfile(p);
+    } catch (err) { left.push(e); }
+  }
+  store.set(PENDING_KEY, JSON.stringify(left));
+}
+
+async function submitScore(score, level) {
+  const entry = { score, level };
+  // optimistic local update so the end screen is correct straight away
+  profile.gamesPlayed++;
+  if (score > profile.bestScore) profile.bestScore = score;
+  if (level > profile.bestLevel) profile.bestLevel = level;
+  profile.history.unshift({ score, level, playedAt: new Date().toISOString() });
+
+  if (!profile.id) return;
+  try {
+    const p = await apiJson(`${API}/score`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: profile.id, score, level }),
+    });
+    applyProfile(p);
+  } catch (e) {
+    queuePending(entry);
+  }
+  fetchLeaderboard();
+}
+
+async function fetchLeaderboard() {
+  leaderboard.status = 'loading';
+  try {
+    const d = await apiJson(`${API}/leaderboard?limit=50`);
+    leaderboard.rows = d.rows || [];
+    leaderboard.status = 'ok';
+  } catch (e) {
+    leaderboard.status = 'offline';
+  }
+}
+
+// ============ NAME ENTRY ============
+const nameOverlay = document.getElementById('nameOverlay');
+const nameInput = document.getElementById('nameInput');
+const nameGo = document.getElementById('nameGo');
+let askingName = false;
+
+// keep taps inside the dialog away from the canvas' tap-to-start
+nameOverlay.addEventListener('pointerdown', e => e.stopPropagation());
+
+function askName() {
+  askingName = true;
+  nameOverlay.classList.add('show');
+  nameInput.value = profile.name || '';
+  // focusing immediately can be ignored on mobile, so defer a frame
+  setTimeout(() => { nameInput.focus(); nameInput.select(); }, 50);
+}
+
+function closeNameOverlay() {
+  nameOverlay.classList.remove('show');
+  askingName = false;
+  nameInput.blur();
+}
+
+async function confirmName() {
+  const v = nameInput.value.trim().toUpperCase().slice(0, 12) || 'PLAYER';
+  nameGo.disabled = true;
+  nameGo.textContent = 'SAVING...';
+  await registerPlayer(v);
+  nameGo.disabled = false;
+  nameGo.textContent = 'START GAME';
+  closeNameOverlay();
+  unlockAudio();
+  fetchLeaderboard();
+  startRun();
+}
+
+nameGo.addEventListener('click', e => { e.stopPropagation(); confirmName(); });
+nameInput.addEventListener('keydown', e => {
+  e.stopPropagation();            // do not drive the game while typing
+  if (e.key === 'Enter') confirmName();
+});
+nameInput.addEventListener('keyup', e => e.stopPropagation());
+
+// "Not you?" - lets a second person on the same device get their own id
+const switchBtn = document.getElementById('switchPlayer');
+if (switchBtn) {
+  switchBtn.addEventListener('pointerdown', e => {
+    e.stopPropagation();
+    e.preventDefault();
+    profile.returning = false;
+    askName();
+  });
+}
+
+// Recognise a returning player as soon as the page opens.
+loadSavedPlayer().then(() => fetchLeaderboard());
+
 // ============ CONSTANTS ============
 const GRAVITY = 0.55;
 const JUMP_POWER = -12.5;
@@ -464,6 +754,9 @@ let bossActiveEnemies = [];
 let villain = null;
 let villainShots = [];   // things the villain throws at Jerry
 let screenShake = 0;
+let playerName = '';
+let levelReached = 1;    // highest level this run got to, shown on the board
+let scoreSubmitted = false;
 
 // Two-stage powerup, Mario style. Jerry starts small with no bomb:
 //   stage 0 (small)  -- hit a power block -> stage 1
@@ -800,6 +1093,7 @@ function triggerBlock(b) {
 // ============ BOSS ============
 function startBoss() {
   gameState = 'boss';
+  levelReached = Math.max(levelReached, 2);   // cleared level 1
   jerry.x = 80; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
   camera.x = 0;
   bombs = [];
@@ -959,6 +1253,7 @@ const l2Goal = { x: L2_END - 160, y: GROUND_Y - 130, w: 40, h: 130 };
 
 function startLevel2() {
   gameState = 'level2';
+  levelReached = Math.max(levelReached, 3);   // beat the factory boss
   jerry.x = 60; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
   jerry.invuln = 90;
   camera.x = 0;
@@ -1127,6 +1422,7 @@ function updateLevel2() {
 // Jerry has to dodge and land 6 bombs while staying alive.
 function startVillain() {
   gameState = 'villain';
+  levelReached = Math.max(levelReached, 4);   // reached the final boss
   jerry.x = 70; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
   jerry.invuln = 90;
   // bombs are the only way to hurt him, so make sure Jerry has them
@@ -2063,6 +2359,128 @@ function wrapText(text, x, y, maxW, lh) {
   return lines.length * lh;
 }
 
+const LEVEL_NAMES = { 1: 'Level 1', 2: 'L1 Boss', 3: 'Level 2', 4: 'Final Boss' };
+
+function drawLeaderboard() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#05203f');
+  g.addColorStop(1, '#0b3f6e');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffd94a';
+  ctx.font = 'bold 30px monospace';
+  ctx.fillText('★ LEADERBOARD ★', W / 2, 46);
+
+  // ---- your own card ----
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(40, 62, W - 80, 54);
+  ctx.strokeStyle = '#4af';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(40, 62, W - 80, 54);
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#4af';
+  ctx.font = 'bold 15px monospace';
+  ctx.fillText(profile.name || 'PLAYER', 56, 84);
+  ctx.fillStyle = '#cfe9ff';
+  ctx.font = '13px monospace';
+  ctx.fillText('Best ' + profile.bestScore, 56, 104);
+  ctx.fillText('Games ' + profile.gamesPlayed, 190, 104);
+  ctx.fillText('Reached ' + (LEVEL_NAMES[profile.bestLevel] || 'Level 1'), 320, 104);
+  if (profile.rank) {
+    // kept clear of the sound button that floats over the top-right corner
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ffd94a';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText('#' + profile.rank, W - 110, 92);
+    ctx.fillStyle = '#8bc';
+    ctx.font = '11px monospace';
+    ctx.fillText('of ' + profile.totalPlayers, W - 110, 108);
+  }
+
+  // ---- ranking table ----
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#8bc';
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('#',      56,  138);
+  ctx.fillText('PLAYER', 92,  138);
+  ctx.fillText('SCORE',  300, 138);
+  ctx.fillText('LEVEL',  400, 138);
+  ctx.strokeStyle = 'rgba(74,175,255,0.4)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(50, 144); ctx.lineTo(W - 220, 144); ctx.stroke();
+
+  const rows = leaderboard.rows.slice(0, 11);
+  if (!rows.length) {
+    ctx.fillStyle = '#8bc';
+    ctx.font = '13px monospace';
+    ctx.fillText(leaderboard.status === 'offline'
+      ? 'Server offline - scores saved on this device.'
+      : 'No scores yet. Be the first!', 56, 176);
+  }
+  rows.forEach((r, i) => {
+    const y = 164 + i * 25;
+    const me = r.id === profile.id;
+    if (me) {
+      ctx.fillStyle = 'rgba(74,175,255,0.18)';
+      ctx.fillRect(50, y - 14, W - 270, 22);
+    }
+    ctx.fillStyle = i === 0 ? '#ffd94a' : i === 1 ? '#d8d8d8' : i === 2 ? '#cd8b4a' : '#8bc';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(String(r.rank), 56, y);
+    ctx.fillStyle = me ? '#fff' : '#cfe9ff';
+    ctx.fillText(r.name, 92, y);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(String(r.score), 300, y);
+    ctx.fillStyle = '#8bc';
+    ctx.font = '11px monospace';
+    ctx.fillText(LEVEL_NAMES[r.level] || 'Level 1', 400, y);
+  });
+
+  // ---- your recent games ----
+  const px = W - 200;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(px - 12, 138, 176, 292);
+  ctx.fillStyle = '#4af';
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText('YOUR LAST GAMES', px, 158);
+  ctx.font = '11px monospace';
+  if (!profile.history.length) {
+    ctx.fillStyle = '#678';
+    ctx.fillText('No games yet', px, 182);
+  }
+  profile.history.slice(0, 9).forEach((h, i) => {
+    const y = 182 + i * 26;
+    ctx.fillStyle = '#cfe9ff';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText(String(h.score), px, y);
+    ctx.fillStyle = '#678';
+    ctx.font = '10px monospace';
+    ctx.fillText(LEVEL_NAMES[h.level] || 'Level 1', px + 62, y);
+    if (h.playedAt) {
+      const d = new Date(h.playedAt);
+      if (!isNaN(d)) ctx.fillText(
+        d.getDate() + '/' + (d.getMonth() + 1), px + 128, y);
+    }
+  });
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = leaderboard.status === 'offline' ? '#f88' : '#5b7';
+  ctx.font = '10px monospace';
+  ctx.fillText(leaderboard.status === 'offline'
+    ? 'offline - run  node server.js  to share scores'
+    : 'synced with media/scores.csv', W / 2, H - 34);
+
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 15px monospace';
+  if (Math.floor(Date.now() / 500) % 2) {
+    ctx.fillText(isTouch ? '▶ TAP TO CONTINUE ◀' : '▶ PRESS ENTER TO CONTINUE ◀', W / 2, H - 12);
+  }
+  ctx.textAlign = 'left';
+}
+
 function drawMenu() {
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, '#0a3a70');
@@ -2165,10 +2583,22 @@ function drawMenu() {
   ctx.fillStyle = '#f88';
   ctx.fillText('2 LEVELS + the Greedy Tycoon final boss!', W/2, 400);
 
+  // greet a player we already know, with their record so far
+  if (profile.id && profile.name) {
+    ctx.fillStyle = '#ffd94a';
+    ctx.font = 'bold 15px monospace';
+    ctx.fillText('WELCOME BACK, ' + profile.name + '!', W/2, 428);
+    ctx.fillStyle = '#cfe9ff';
+    ctx.font = '12px monospace';
+    const bits = ['Best ' + profile.bestScore, profile.gamesPlayed + ' games'];
+    if (profile.rank) bits.push('Rank #' + profile.rank + '/' + profile.totalPlayers);
+    ctx.fillText(bits.join('   ·   '), W/2, 446);
+  }
+
   ctx.fillStyle = '#0f0';
   ctx.font = 'bold 18px monospace';
   if (Math.floor(Date.now() / 500) % 2) {
-    ctx.fillText(isTouch ? '▶ TAP HERE TO START ◀' : '▶ PRESS ENTER TO START ◀', W/2, 460);
+    ctx.fillText(isTouch ? '▶ TAP HERE TO START ◀' : '▶ PRESS ENTER TO START ◀', W/2, 474);
   }
   ctx.textAlign = 'left';
 }
@@ -2324,11 +2754,25 @@ function loop() {
   // each scene has its own theme; playMusic ignores repeat calls
   playMusic(gameState);
 
+  // the "not you?" chip belongs on the menu only
+  if (switchBtn) {
+    switchBtn.style.display =
+      (gameState === 'menu' && profile.id && !askingName) ? 'block' : 'none';
+  }
+
   if (gameState === 'menu') {
     drawMenu();
-    if (keys['enter'] || tapped) {
-      fullReset();
-      gameState = 'playing';
+    // the dialog owns input while it is open
+    if (!askingName && (keys['enter'] || tapped)) {
+      keys['enter'] = false;
+      if (profile.id) startRun();   // known player - straight in
+      else askName();               // first time here - ask who they are
+    }
+  } else if (gameState === 'board') {
+    drawLeaderboard();
+    if (!askingName && (keys['enter'] || keys['r'] || tapped)) {
+      keys['enter'] = false; keys['r'] = false;
+      gameState = 'menu';
     }
   } else if (gameState === 'playing') {
     updatePlaying();
@@ -2343,14 +2787,31 @@ function loop() {
     updateVillain();
     draw();
   } else if (gameState === 'gameover') {
+    recordRun();
     draw();
     drawGameOver();
-    if (keys['r'] || tapped) { gameState = 'menu'; }
+    if (keys['r'] || tapped) { keys['r'] = false; gameState = 'board'; }
   } else if (gameState === 'win') {
+    recordRun();
     drawWin();
-    if (keys['r'] || tapped) { gameState = 'menu'; }
+    if (keys['r'] || tapped) { keys['r'] = false; gameState = 'board'; }
   }
   requestAnimationFrame(loop);
+}
+
+// Starts a fresh run for the current player.
+function startRun() {
+  fullReset();
+  levelReached = 1;
+  scoreSubmitted = false;
+  gameState = 'playing';
+}
+
+// Called every frame on the end screens; only sends once per run.
+function recordRun() {
+  if (scoreSubmitted) return;
+  scoreSubmitted = true;
+  submitScore(score, levelReached);
 }
 
 resetLevel();
