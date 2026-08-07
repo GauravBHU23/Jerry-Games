@@ -6,6 +6,12 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#001830">
+<meta name="description" content="An educational platformer about water pollution and treatment. 8 levels, a greedy tycoon and a shared leaderboard.">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Jerry">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="media/icon-192.png">
+<link rel="apple-touch-icon" href="media/icon-192.png">
 <title>Jerry the Water Saviour</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -130,6 +136,51 @@
   }
   #switchPlayer:hover { color: #fff; border-color: #4af; }
   #switchPlayer:active { transform: scale(0.95); }
+
+  /* install-as-app button, only shown when the browser offers it */
+  #installBtn {
+    position: absolute;
+    right: 8px; bottom: 8px;
+    display: none;
+    padding: 7px 13px;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    color: #04121f;
+    background: linear-gradient(#7cd4ff, #4af);
+    border: none;
+    border-radius: 16px;
+    cursor: pointer;
+    z-index: 21;
+    box-shadow: 0 3px 12px rgba(74,175,255,0.45);
+    animation: pulseIn 2.4s ease-in-out infinite;
+  }
+  #installBtn:active { transform: scale(0.95); }
+  @keyframes pulseIn {
+    0%, 100% { box-shadow: 0 3px 12px rgba(74,175,255,0.35); }
+    50%      { box-shadow: 0 3px 20px rgba(74,175,255,0.8); }
+  }
+
+  /* small transient message (installed, offline, score saved…) */
+  #toast {
+    position: absolute;
+    left: 50%; bottom: 14px;
+    transform: translateX(-50%) translateY(12px);
+    padding: 9px 16px;
+    font-size: 12px;
+    color: #cfe9ff;
+    background: rgba(6, 26, 50, 0.95);
+    border: 1px solid #4af;
+    border-radius: 18px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s, transform .25s;
+    z-index: 40;
+    line-height: normal;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   #game {
     display: block;
     width: 100%;
@@ -223,6 +274,8 @@
   </div>
 
   <div id="switchPlayer" role="button" tabindex="0" title="Play as someone else">👤 Not you?</div>
+  <button id="installBtn" type="button" title="Install this game">⬇ Install</button>
+  <div id="toast" role="status" aria-live="polite"></div>
 </div>
 <div id="info">
   <kbd>←</kbd> <kbd>→</kbd> move &nbsp;•&nbsp;
@@ -547,6 +600,7 @@ const profile = {
   gamesPlayed: 0,
   bestScore: 0,
   bestLevel: 1,
+  bestTimeMs: 0,
   rank: null,
   totalPlayers: 0,
   history: [],
@@ -575,6 +629,7 @@ function applyProfile(p) {
   profile.gamesPlayed = p.gamesPlayed || 0;
   profile.bestScore = p.bestScore || 0;
   profile.bestLevel = p.bestLevel || 1;
+  profile.bestTimeMs = p.bestTimeMs || 0;
   profile.rank = p.rank == null ? null : p.rank;
   profile.totalPlayers = p.totalPlayers || 0;
   profile.history = p.history || [];
@@ -636,7 +691,7 @@ async function flushPendingScores() {
       const p = await apiJson(`${API}/score`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: profile.id, score: e.score, level: e.level }),
+        body: JSON.stringify({ id: profile.id, score: e.score, level: e.level, durationMs: e.durationMs }),
       });
       applyProfile(p);
     } catch (err) { left.push(e); }
@@ -644,20 +699,20 @@ async function flushPendingScores() {
   store.set(PENDING_KEY, JSON.stringify(left));
 }
 
-async function submitScore(score, level) {
-  const entry = { score, level };
+async function submitScore(score, level, durationMs) {
+  const entry = { score, level, durationMs };
   // optimistic local update so the end screen is correct straight away
   profile.gamesPlayed++;
   if (score > profile.bestScore) profile.bestScore = score;
   if (level > profile.bestLevel) profile.bestLevel = level;
-  profile.history.unshift({ score, level, playedAt: new Date().toISOString() });
+  profile.history.unshift({ score, level, durationMs, playedAt: new Date().toISOString() });
 
   if (!profile.id) return;
   try {
     const p = await apiJson(`${API}/score`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: profile.id, score, level }),
+      body: JSON.stringify({ id: profile.id, score, level, durationMs }),
     });
     applyProfile(p);
   } catch (e) {
@@ -676,6 +731,62 @@ async function fetchLeaderboard() {
     leaderboard.status = 'offline';
   }
 }
+
+// ============ PWA ============
+// Registers the service worker so the game installs to the home screen and
+// keeps working with no connection.
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function toast(msg, ms) {
+  if (!toastEl) return;
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), ms || 2600);
+}
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+// Chrome/Edge fire this instead of installing straight away; we stash it and
+// show our own button so the prompt appears at a sensible moment.
+const installBtn = document.getElementById('installBtn');
+let installPrompt = null;
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  installPrompt = e;
+  if (installBtn) installBtn.style.display = 'block';
+});
+
+if (installBtn) {
+  installBtn.addEventListener('click', async e => {
+    e.stopPropagation();
+    if (!installPrompt) return;
+    installBtn.style.display = 'none';
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    installPrompt = null;
+    if (outcome === 'accepted') toast('Installed! Look for Jerry on your home screen');
+    else if (installBtn) installBtn.style.display = 'block';
+  });
+  installBtn.addEventListener('pointerdown', e => e.stopPropagation());
+}
+
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  if (installBtn) installBtn.style.display = 'none';
+  toast('Installed! Look for Jerry on your home screen');
+});
+
+window.addEventListener('online', () => {
+  toast('Back online - syncing scores');
+  flushPendingScores().then(fetchLeaderboard);
+});
+window.addEventListener('offline', () => toast('Offline - scores will sync later'));
 
 // ============ NAME ENTRY ============
 const nameOverlay = document.getElementById('nameOverlay');
@@ -741,9 +852,73 @@ const MOVE_SPEED = 3.8;
 const GROUND_Y = 440;
 const LEVEL_END = 3200;
 
+// ============ LEVEL TABLE ============
+// Eight stages, then the final boss. Each row only describes how the level
+// differs; buildLevel() turns it into platforms, pits, blocks and enemies, so
+// difficulty scales in one place instead of eight hand-made maps.
+//
+//  len      how far the level runs
+//  gaps     number of sewage pits (wider + more = harder jumping)
+//  gapW     pit width
+//  enemies  how many patrolling enemies
+//  speed    enemy speed multiplier
+//  kinds    which enemy types can appear
+//  power    what the second power block unlocks at this level
+const LEVELS = [
+  { n: 1, name: 'THE RIVERBANK',   len: 3000, gaps: 3, gapW:  90, enemies: 4,  speed: 1.00,
+    kinds: ['trash'],                              power: 'bomb',
+    sky: ['#6bd6ff', '#c9f2ff'], ground: 'grass',
+    intro: 'Trash is choking the river. Hit ? blocks from below to grow, then again for WATER BOMBS!' },
+
+  { n: 2, name: 'THE OLD CANAL',   len: 3200, gaps: 4, gapW: 100, enemies: 5,  speed: 1.08,
+    kinds: ['trash', 'drum'],                      power: 'rapid',
+    sky: ['#7fc9e8', '#d8ecc9'], ground: 'grass',
+    intro: 'Rusting drums leak chemicals here. RAPID BOMBS let you throw much faster!' },
+
+  { n: 3, name: 'THE DEAD MARSH',  len: 3400, gaps: 5, gapW: 110, enemies: 6,  speed: 1.16,
+    kinds: ['trash', 'barrel'],                    power: 'triple',
+    sky: ['#8aa89a', '#cfc9a0'], ground: 'dead',
+    intro: 'Barrels roll fast down the marsh. TRIPLE SHOT throws three bombs in a spread!' },
+
+  { n: 4, name: 'DRONE PATROL',    len: 3600, gaps: 5, gapW: 120, enemies: 7,  speed: 1.24,
+    kinds: ['barrel', 'drone'],                    power: 'doublejump',
+    sky: ['#7a86a8', '#b9a48c'], ground: 'dead',
+    intro: 'His drones guard the sky - only bombs bring them down. DOUBLE JUMP unlocked!' },
+
+  { n: 5, name: 'THE PIPE WORKS',  len: 3800, gaps: 6, gapW: 125, enemies: 8,  speed: 1.32,
+    kinds: ['drum', 'drone', 'barrel'],            power: 'shield',
+    sky: ['#8a7a90', '#c9a08c'], ground: 'rust',
+    intro: 'Pipes dump waste straight into the water. A SHIELD now absorbs one hit!' },
+
+  { n: 6, name: 'TOXIC OUTFALL',   len: 4000, gaps: 7, gapW: 130, enemies: 9,  speed: 1.40,
+    kinds: ['barrel', 'drone', 'spitter'],         power: 'pierce',
+    sky: ['#7a6a8a', '#b98c7a'], ground: 'rust',
+    intro: 'SPITTERS shoot sludge from a distance. PIERCING BOMBS pass through enemies!' },
+
+  { n: 7, name: 'THE SMOG BELT',   len: 4200, gaps: 7, gapW: 135, enemies: 10, speed: 1.48,
+    kinds: ['drone', 'spitter', 'chaser'],         power: 'blast',
+    sky: ['#6a5a7a', '#a87a6a'], ground: 'ash',
+    intro: 'CHASERS hunt you down. BLAST RADIUS makes every bomb explode wider!' },
+
+  { n: 8, name: 'THE TYCOON TOWER',len: 4400, gaps: 8, gapW: 140, enemies: 11, speed: 1.56,
+    kinds: ['spitter', 'chaser', 'drone', 'barrel'], power: 'overdrive',
+    sky: ['#4a3a60', '#8a5a5a'], ground: 'ash',
+    intro: 'His tower is just ahead. OVERDRIVE: maximum fire rate. Finish this!' },
+];
+
+const FINAL_LEVEL = LEVELS.length;   // 8
+
+function levelDef(n) {
+  return LEVELS[Math.max(0, Math.min(LEVELS.length - 1, n - 1))];
+}
+
 // ============ STATE ============
-// menu -> playing (L1) -> boss (factory) -> level2 -> villain -> win
+// menu -> playing (levels 1..8) -> villain -> win
 let gameState = 'menu';
+let level = 1;             // which level is being played
+let levelData = null;      // the generated map for the current level
+let levelBanner = 0;       // frames left showing the "LEVEL n" title card
+let powerBanner = null;    // {text, timer} shown when a new power unlocks
 let score = 0;
 let lives = 3;
 let camera = { x: 0 };
@@ -757,6 +932,8 @@ let screenShake = 0;
 let playerName = '';
 let levelReached = 1;    // highest level this run got to, shown on the board
 let scoreSubmitted = false;
+let runStartedAt = 0;      // wall clock when this run began
+let runDurationMs = 0;     // frozen when the run ends, used to break score ties
 
 // Two-stage powerup, Mario style. Jerry starts small with no bomb:
 //   stage 0 (small)  -- hit a power block -> stage 1
@@ -773,10 +950,14 @@ const jerry = {
   powered: false,   // stage >= 1: bigger droplet
   hasBomb: false,   // stage 2 only: a bomb is ready to throw
   bombCooldown: 0,
-  rapidBomb: false,
+  powers: new Set(),   // level rewards, kept for the rest of the run
+  shield: false,       // 'shield' power charge, spent on the next hit
+  shieldCd: 0,         // frames until the shield comes back
+  jumps: 0,            // jumps used since leaving the ground
   facing: 1,
   invuln: 0,
-  _xheld: false
+  _xheld: false,
+  _jumpHeld: false
 };
 
 // Applies whatever a given stage means, so every place agrees.
@@ -786,72 +967,213 @@ function setStage(n) {
   if (jerry.stage < 2) {
     jerry.hasBomb = false;
     jerry.bombCooldown = 0;
-    jerry.rapidBomb = false;
   } else {
     jerry.hasBomb = true;
     jerry.bombCooldown = 0;
   }
 }
 
-// ============ LEVEL DATA ============
-const platforms = [
-  { x: 0,    y: GROUND_Y, w: 600, h: 60, kind: 'ground' },
-  { x: 700,  y: GROUND_Y, w: 500, h: 60, kind: 'ground' },
-  { x: 1300, y: GROUND_Y, w: 400, h: 60, kind: 'ground' },
-  { x: 1800, y: GROUND_Y, w: 500, h: 60, kind: 'ground' },
-  { x: 2400, y: GROUND_Y, w: 850, h: 60, kind: 'ground' },
-  { x: 340,  y: 340, w: 110, h: 18, kind: 'brick' },
-  { x: 900,  y: 320, w: 130, h: 18, kind: 'brick' },
-  { x: 1380, y: 300, w: 110, h: 18, kind: 'brick' },
-  { x: 1540, y: 220, w: 90,  h: 18, kind: 'brick' },
-  { x: 2000, y: 320, w: 160, h: 18, kind: 'brick' },
-  { x: 2530, y: 300, w: 110, h: 18, kind: 'brick' },
-];
+// ---- level powers ----
+// Unlocked by reaching a level's second power block; they stack and persist
+// for the rest of the run, so later levels feel genuinely stronger.
+const POWER_INFO = {
+  bomb:       { label: 'WATER BOMB',  blurb: 'Press [X] to throw water bombs' },
+  rapid:      { label: 'RAPID FIRE',  blurb: 'Throw far more often' },
+  triple:     { label: 'TRIPLE SHOT', blurb: 'Three bombs in a spread' },
+  doublejump: { label: 'DOUBLE JUMP', blurb: 'Jump again in mid-air' },
+  shield:     { label: 'SHIELD',      blurb: 'Absorbs one hit, then recharges' },
+  pierce:     { label: 'PIERCING',    blurb: 'Bombs pass through enemies' },
+  blast:      { label: 'BLAST RADIUS',blurb: 'Bigger explosions' },
+  overdrive:  { label: 'OVERDRIVE',   blurb: 'Maximum fire rate' },
+};
 
+function hasPower(p) { return jerry.powers.has(p); }
+
+function grantPower(p) {
+  if (!p || jerry.powers.has(p)) return false;
+  jerry.powers.add(p);
+  if (p === 'shield') jerry.shield = true;
+  return true;
+}
+
+// Cooldown shrinks as fire-rate powers stack up.
+function bombCooldownFrames() {
+  let cd = BOMB_COOLDOWN;
+  if (hasPower('rapid')) cd /= 3;
+  if (hasPower('overdrive')) cd /= 2;
+  return Math.max(4, Math.round(cd));
+}
+
+function bombRadius() { return hasPower('blast') ? 15 : 9; }
+
+// Every throw goes through here so all levels behave the same.
+function throwBombs(speed) {
+  const dirs = hasPower('triple') ? [-0.32, 0, 0.32] : [0];
+  for (const spread of dirs) {
+    bombs.push({
+      x: jerry.x + jerry.w / 2,
+      y: jerry.y + jerry.h / 2,
+      vx: jerry.facing * (speed || 9),
+      vy: -1.5 + spread * 9,
+      r: bombRadius(),
+      pierce: hasPower('pierce'),
+      hits: 0,
+    });
+  }
+  jerry.hasBomb = false;
+  jerry.bombCooldown = bombCooldownFrames();
+  sfx('throw');
+}
+
+// ============ LEVEL GENERATION ============
+// Built from the LEVELS table so every stage scales the same way.
+let platforms = [];
+let hazards = [];
 let blocks = [];
 let enemies = [];
 let signs = [];
+let goal = { x: 0, y: 0, w: 40, h: 130 };
+let boss = null;
 
-function resetLevel() {
-  blocks = [
-    // two power blocks early on: first grows Jerry, second arms his bombs
-    { x: 250, y: 300, w: 40, h: 40, type: 'filter',   hit: false },
-    { x: 450, y: 200, w: 40, h: 40, type: 'water',    hit: false },
-    { x: 760, y: 300, w: 40, h: 40, type: 'uv',       hit: false },
-    { x: 950, y: 240, w: 40, h: 40, type: 'chlorine', hit: false },
-    { x: 1420, y: 220, w: 40, h: 40, type: 'water',   hit: false },
-    { x: 1560, y: 140, w: 40, h: 40, type: 'uv',      hit: false },
-    { x: 2050, y: 240, w: 40, h: 40, type: 'water',   hit: false },
-    { x: 2560, y: 220, w: 40, h: 40, type: 'filter',  hit: false },
-    { x: 2800, y: 340, w: 40, h: 40, type: 'uv',      hit: false },
-  ];
-  enemies = [
-    { x: 480, y: 410, w: 30, h: 30, vx: -1.2, type: 'trash', alive: true, minX: 300,  maxX: 590 },
-    { x: 900, y: 410, w: 30, h: 30, vx: -1.2, type: 'trash', alive: true, minX: 720,  maxX: 1180 },
-    { x: 1500,y: 410, w: 30, h: 30, vx:  1.2, type: 'trash', alive: true, minX: 1310, maxX: 1680 },
-    { x: 2100,y: 410, w: 30, h: 30, vx: -1.2, type: 'trash', alive: true, minX: 1820, maxX: 2280 },
-    { x: 2700,y: 400, w: 40, h: 40, vx: 0,    type: 'drum',  alive: true },
-    { x: 3000,y: 410, w: 30, h: 30, vx: -1.5, type: 'trash', alive: true, minX: 2450, maxX: 3150 },
-  ];
-  signs = [
-    { x: 150,  y: GROUND_Y - 50, text: "Help Jerry save the rivers! Break blocks from below for powers." },
-    { x: 810,  y: GROUND_Y - 50, text: "FILTRATION: Sand and gravel filters trap solid particles from wastewater." },
-    { x: 1350, y: GROUND_Y - 50, text: "SEWAGE contains harmful microbes and chemicals. Never touch it directly!" },
-    { x: 1930, y: GROUND_Y - 50, text: "Industries dump waste into rivers. Together we must hold them accountable!" },
-  ];
-  signs.forEach(s => s.shown = false);
-}
-
-const hazards = [
-  { x: 600, y: GROUND_Y, w: 100, h: 60 },
-  { x: 1200, y: GROUND_Y, w: 100, h: 60 },
-  { x: 1700, y: GROUND_Y, w: 100, h: 60 },
-  { x: 2300, y: GROUND_Y, w: 100, h: 60 },
+const EDU_LINES = [
+  'FILTRATION: sand and gravel filters trap solid particles from wastewater.',
+  'SEWAGE carries harmful microbes and chemicals. Never touch it directly!',
+  'Industries dump waste into rivers. Together we must hold them accountable!',
+  'CHLORINATION kills bacteria and viruses in most city water supplies.',
+  'UV DISINFECTION cleans water using light instead of chemicals.',
+  'Heavy metals like lead and mercury build up in fish and in people.',
+  'Wetlands act as natural filters - protecting them protects our water.',
+  'One litre of oil can pollute a million litres of drinking water.',
 ];
 
-const goal = { x: LEVEL_END - 150, y: GROUND_Y - 130, w: 40, h: 130 };
+// Enemy templates. Ground walkers sit on the floor, fliers hover.
+function makeEnemy(kind, x, minX, maxX, speed) {
+  const base = { x, alive: true, minX, maxX, type: kind };
+  if (kind === 'trash')
+    return { ...base, y: GROUND_Y - 30, w: 30, h: 30, vx: -1.2 * speed };
+  if (kind === 'drum')
+    return { ...base, y: GROUND_Y - 40, w: 40, h: 40, vx: 0 };
+  if (kind === 'barrel')
+    return { ...base, y: GROUND_Y - 34, w: 34, h: 34, vx: -1.8 * speed };
+  if (kind === 'drone')
+    return { ...base, y: 250, w: 32, h: 26, vx: 1.6 * speed,
+             baseY: 200 + Math.random() * 90, phase: Math.random() * 6 };
+  if (kind === 'spitter')
+    return { ...base, y: GROUND_Y - 38, w: 34, h: 38, vx: 0.7 * speed,
+             fireTimer: 60 + Math.floor(Math.random() * 90) };
+  if (kind === 'chaser')
+    return { ...base, y: GROUND_Y - 32, w: 32, h: 32, vx: 1.1 * speed, speed };
+  return { ...base, y: GROUND_Y - 30, w: 30, h: 30, vx: -1.2 * speed };
+}
 
-let boss = null;
+// Turns a LEVELS row into an actual playable map.
+function buildLevel(n) {
+  const d = levelDef(n);
+  const end = d.len;
+  const rnd = mulberry(n * 7919);      // same layout every time you replay
+
+  // --- ground split by sewage pits ---
+  platforms = [];
+  hazards = [];
+  const segCount = d.gaps + 1;
+  const usable = end - 260;            // keep the start and the goal solid
+  const segW = usable / segCount;
+  let x = 0;
+  for (let i = 0; i < segCount; i++) {
+    const isLast = i === segCount - 1;
+    const w = isLast ? end - x : segW - d.gapW;
+    platforms.push({ x, y: GROUND_Y, w: Math.max(120, w), h: 60, kind: 'ground' });
+    x += Math.max(120, w);
+    if (!isLast) {
+      hazards.push({ x, y: GROUND_Y, w: d.gapW, h: 60 });
+      x += d.gapW;
+    }
+  }
+
+  // --- floating brick platforms, higher and thinner as levels go up ---
+  const brickCount = 5 + Math.floor(n * 0.8);
+  const brickW = Math.max(70, 130 - n * 6);
+  for (let i = 0; i < brickCount; i++) {
+    const bx = 300 + (i * (end - 500) / brickCount) + rnd() * 90;
+    const by = 340 - rnd() * (90 + n * 10);
+    platforms.push({ x: Math.round(bx), y: Math.round(by), w: brickW, h: 18, kind: 'brick' });
+  }
+
+  // --- power blocks: two early ones so bombs are always earnable ---
+  // Both must sit over solid ground, otherwise the level's bomb is unreachable.
+  blocks = [];
+  for (const [wantX, type] of [[250, 'filter'], [620, 'uv']]) {
+    blocks.push({ x: solidXNear(wantX), y: 300, w: 40, h: 40, type, hit: false });
+  }
+  // bonus blocks, fewer the further you get
+  const bonus = Math.max(3, 8 - Math.floor(n / 2));
+  for (let i = 0; i < bonus; i++) {
+    const bx = 900 + i * ((end - 1200) / bonus) + rnd() * 60;
+    const by = 320 - rnd() * (80 + n * 8);
+    const roll = rnd();
+    const type = roll < 0.5 ? 'water' : roll < 0.78 ? 'chlorine' : 'filter';
+    const bl = { x: Math.round(bx), y: Math.round(by), w: 40, h: 40, type, hit: false };
+    if (!overlapsAny(bl, platforms) && !overSewage(bl)) blocks.push(bl);
+  }
+
+  // --- enemies spread across the level ---
+  enemies = [];
+  for (let i = 0; i < d.enemies; i++) {
+    const kind = d.kinds[i % d.kinds.length];
+    const span = (end - 700) / d.enemies;
+    const from = 500 + i * span;
+    enemies.push(makeEnemy(kind, from + span * 0.4, from, from + span, d.speed));
+  }
+
+  // --- signs: level intro plus a couple of facts ---
+  signs = [
+    { x: 150, y: GROUND_Y - 50, text: d.intro },
+    { x: Math.round(end * 0.42), y: GROUND_Y - 50, text: EDU_LINES[(n * 2) % EDU_LINES.length] },
+    { x: Math.round(end * 0.72), y: GROUND_Y - 50, text: EDU_LINES[(n * 2 + 1) % EDU_LINES.length] },
+  ];
+  signs.forEach(s => s.shown = false);
+
+  goal = { x: end - 150, y: GROUND_Y - 130, w: 40, h: 130 };
+  levelData = { ...d, end };
+  return levelData;
+}
+
+// Nearest x to `want` that has ground under it and is clear of every pit.
+function solidXNear(want) {
+  const ok = x => {
+    const onGround = platforms.some(p =>
+      p.kind === 'ground' && x > p.x + 20 && x + 40 < p.x + p.w - 20);
+    const clear = !hazards.some(h => x + 40 > h.x - 20 && x < h.x + h.w + 20);
+    return onGround && clear;
+  };
+  if (ok(want)) return want;
+  for (let step = 20; step <= 900; step += 20) {
+    if (ok(want + step)) return want + step;
+    if (want - step > 60 && ok(want - step)) return want - step;
+  }
+  return want;
+}
+
+function overlapsAny(r, list) {
+  return list.some(p => rectHit(
+    { x: r.x - 6, y: r.y - 6, w: r.w + 12, h: r.h + 12 }, p));
+}
+function overSewage(r) {
+  return hazards.some(h => r.x + r.w > h.x - 10 && r.x < h.x + h.w + 10);
+}
+
+// Small seeded RNG so a level looks identical every time it is replayed.
+function mulberry(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function resetLevel() { buildLevel(level); }
 
 // ============ HELPERS ============
 function rectHit(a, b) {
@@ -882,9 +1204,20 @@ function spawnParticles(x, y, color, count) {
 
 function damagePlayer() {
   if (jerry.invuln > 0) return;
-  // In the boss arenas bombs are the only weapon, so losing them would make the
+
+  // SHIELD soaks the hit and then recharges over a few seconds
+  if (jerry.shield) {
+    jerry.shield = false;
+    jerry.shieldCd = 480;
+    jerry.invuln = 60;
+    sfx('hit');
+    spawnParticles(jerry.x + 14, jerry.y + 18, '#6ef', 18);
+    return;
+  }
+
+  // In the boss arena bombs are the only weapon, so losing them would make the
   // fight unwinnable - take a life instead of dropping a stage.
-  const inBossFight = gameState === 'boss' || gameState === 'villain';
+  const inBossFight = gameState === 'villain';
   if (jerry.stage > 0 && !inBossFight) {
     // drop one stage: armed -> big -> small, only then lose a life
     setStage(jerry.stage - 1);
@@ -900,82 +1233,75 @@ function damagePlayer() {
 }
 
 function respawnPlayer() {
-  if (gameState === 'boss') {
-    jerry.x = 80; jerry.y = 300;
-  } else if (gameState === 'villain') {
+  if (gameState === 'villain') {
     // respawn on the far side from the villain so he can't camp the spawn
     jerry.x = villain && villain.x < W / 2 ? W - 110 : 70;
     jerry.y = 280;
     villainShots = [];
   } else {
-    jerry.x = Math.max(100, jerry.x - 200);
+    jerry.x = Math.max(60, jerry.x - 200);
     jerry.y = 200;
+    // clear sludge near the respawn so you are not hit instantly
+    villainShots = villainShots.filter(s => Math.abs(s.x - jerry.x) > 200);
   }
   jerry.vx = 0; jerry.vy = 0;
+  jerry.jumps = 0;
   jerry.invuln = 90;
 }
 
 // ============ UPDATE ============
 function updatePlaying() {
-  // input
+  const d = levelData || levelDef(level);
+
+  // ---- input ----
   let ax = 0;
   if (keys['arrowleft'] || keys['a']) ax = -MOVE_SPEED;
   if (keys['arrowright'] || keys['d']) ax = MOVE_SPEED;
   jerry.vx = ax;
   if (ax !== 0) jerry.facing = Math.sign(ax);
 
-  if ((keys[' '] || keys['w'] || keys['arrowup']) && jerry.onGround) {
-    jerry.vy = JUMP_POWER;
+  // jump, with an extra mid-air jump once DOUBLE JUMP is unlocked
+  const jumpKey = keys[' '] || keys['w'] || keys['arrowup'];
+  const maxJumps = hasPower('doublejump') ? 2 : 1;
+  if (jumpKey && !jerry._jumpHeld && jerry.jumps < maxJumps) {
+    jerry.vy = JUMP_POWER * (jerry.jumps === 0 ? 1 : 0.88);
     jerry.onGround = false;
+    jerry.jumps++;
     sfx('jump');
+    if (jerry.jumps === 2) spawnParticles(jerry.x + 14, jerry.y + jerry.h, '#cfe9ff', 8);
   }
+  jerry._jumpHeld = jumpKey;
 
   if (keys['x'] && jerry.hasBomb && !jerry._xheld) {
-    // Nearly flat throw: a high arc sailed over enemies at close range.
-    bombs.push({
-      x: jerry.x + jerry.w / 2, y: jerry.y + jerry.h / 2,
-      vx: jerry.facing * 9, vy: -1.5, r: 8
-    });
-    jerry.hasBomb = false;
-    jerry.bombCooldown = jerry.rapidBomb ? BOMB_COOLDOWN / 3 : BOMB_COOLDOWN;
-    sfx('throw');
+    throwBombs(9);
     jerry._xheld = true;
   }
   if (!keys['x']) jerry._xheld = false;
-
-  // recharge the bomb instead of running out
   if (jerry.bombCooldown > 0 && --jerry.bombCooldown === 0) jerry.hasBomb = true;
 
-  // physics
+  // shield slowly recharges after being spent
+  if (hasPower('shield') && !jerry.shield) {
+    if (--jerry.shieldCd <= 0) { jerry.shield = true; jerry.shieldCd = 0; }
+  }
+
+  // ---- physics ----
   jerry.vy = Math.min(15, jerry.vy + GRAVITY);
   jerry.x += jerry.vx;
   jerry.y += jerry.vy;
   jerry.onGround = false;
+  if (jerry.x < 0) jerry.x = 0;
 
-  // platform collision
-  const allSolids = platforms.concat(blocks.filter(b => true));
-  for (const p of allSolids) {
+  for (const p of platforms.concat(blocks)) {
     if (rectHit(jerry, p)) {
       const prevX = jerry.x - jerry.vx;
       const prevY = jerry.y - jerry.vy;
-      // top
       if (prevY + jerry.h <= p.y + 1) {
-        jerry.y = p.y - jerry.h;
-        jerry.vy = 0;
-        jerry.onGround = true;
-      }
-      // bottom (hit head)
-      else if (prevY >= p.y + p.h - 1) {
-        jerry.y = p.y + p.h;
-        jerry.vy = 1;
-        // trigger mystery block
-        if (!p.hit && p.type) {
-          p.hit = true;
-          triggerBlock(p);
-        }
-      }
-      // sides
-      else if (prevX + jerry.w <= p.x + 1) {
+        jerry.y = p.y - jerry.h; jerry.vy = 0;
+        jerry.onGround = true; jerry.jumps = 0;
+      } else if (prevY >= p.y + p.h - 1) {
+        jerry.y = p.y + p.h; jerry.vy = 1;
+        if (!p.hit && p.type) { p.hit = true; triggerBlock(p); }
+      } else if (prevX + jerry.w <= p.x + 1) {
         jerry.x = p.x - jerry.w;
       } else if (prevX >= p.x + p.w - 1) {
         jerry.x = p.x + p.w;
@@ -983,19 +1309,51 @@ function updatePlaying() {
     }
   }
 
-  // enemies
+  // ---- enemies ----
   for (const e of enemies) {
     if (!e.alive) continue;
-    if (e.type === 'trash') {
+
+    if (e.type === 'chaser') {
+      // walks toward Jerry, but only within its own stretch of the level
+      const dir = Math.sign((jerry.x + jerry.w / 2) - (e.x + e.w / 2)) || 1;
+      e.x += dir * Math.abs(e.vx);
+      e.x = Math.max(e.minX, Math.min(e.maxX - e.w, e.x));
+      e.vx = dir * Math.abs(e.vx);
+    } else if (e.type === 'spitter') {
+      e.x += e.vx;
+      if (e.x < e.minX) { e.x = e.minX; e.vx *= -1; }
+      if (e.x + e.w > e.maxX) { e.x = e.maxX - e.w; e.vx *= -1; }
+      // fires sludge when Jerry is roughly in front of it
+      if (--e.fireTimer <= 0) {
+        e.fireTimer = Math.max(50, 130 - level * 8);
+        const dx = (jerry.x + jerry.w / 2) - (e.x + e.w / 2);
+        if (Math.abs(dx) < 380) {
+          villainShots.push({
+            x: e.x + e.w / 2, y: e.y + 8,
+            vx: Math.sign(dx) * (3 + level * 0.15), vy: -3.4,
+            r: 8, kind: 'toxic', spin: 0, fromEnemy: true,
+          });
+        }
+      }
+    } else if (e.type !== 'drum') {
       e.x += e.vx;
       if (e.x < e.minX) { e.x = e.minX; e.vx *= -1; }
       if (e.x + e.w > e.maxX) { e.x = e.maxX - e.w; e.vx *= -1; }
     }
+
+    if (e.type === 'drone') {
+      e.phase += 0.04;
+      e.y = e.baseY + Math.sin(e.phase) * 26;
+    }
+
     if (jerry.invuln <= 0 && rectHit(jerry, e)) {
-      if (jerry.vy > 1 && (jerry.y + jerry.h - jerry.vy) < e.y + 8 && e.type === 'trash') {
+      // stompable on top: everything on the ground except drones and drums
+      const stompable = e.type === 'trash' || e.type === 'barrel' || e.type === 'chaser';
+      if (stompable && jerry.vy > 1 && (jerry.y + jerry.h - jerry.vy) < e.y + 10) {
         e.alive = false;
         jerry.vy = JUMP_POWER * 0.65;
-        score += 100;
+        jerry.jumps = Math.min(jerry.jumps, 1);
+        score += 100 + level * 10;
         sfx('hit');
         spawnParticles(e.x + 15, e.y + 15, '#8b6f47', 10);
       } else {
@@ -1004,7 +1362,21 @@ function updatePlaying() {
     }
   }
 
-  // hazards - sewage
+  // ---- sludge fired by spitters ----
+  for (const s of villainShots) {
+    s.vy += GRAVITY * 0.55;
+    s.x += s.vx; s.y += s.vy;
+    s.spin += 0.2;
+    if (s.y - s.r > H || s.x < camera.x - 120 || s.x > camera.x + W + 120) s.dead = true;
+    if (!s.dead && jerry.invuln <= 0 &&
+        rectHit({ x: s.x - s.r, y: s.y - s.r, w: s.r * 2, h: s.r * 2 }, jerry)) {
+      s.dead = true;
+      damagePlayer();
+    }
+  }
+  villainShots = villainShots.filter(s => !s.dead);
+
+  // ---- sewage pits ----
   for (const h of hazards) {
     if (jerry.y + jerry.h > h.y + 8 &&
         jerry.x + jerry.w > h.x + 5 && jerry.x < h.x + h.w - 5) {
@@ -1013,51 +1385,66 @@ function updatePlaying() {
     }
   }
 
-  // fall off
   if (jerry.y > H + 50) damagePlayer();
 
-  // sign popups
   for (const s of signs) {
     if (s.shown) continue;
-    if (Math.abs((jerry.x + jerry.w/2) - (s.x + 20)) < 40) {
+    if (Math.abs((jerry.x + jerry.w / 2) - (s.x + 20)) < 40) {
       s.shown = true;
       showPopup(s.text);
     }
   }
 
-  // bombs
+  // ---- bombs ----
   for (const b of bombs) {
     b.vy += GRAVITY * 0.5;
     b.x += b.vx; b.y += b.vy;
-    if (b.y > H + 50 || b.x < -50 || b.x > LEVEL_END + 50) b.dead = true;
-    // hit enemies — test the bomb's radius, not just its centre point
+    if (b.y > H + 50 || b.x < -50 || b.x > d.end + 50) b.dead = true;
     for (const e of enemies) {
-      if (!e.alive) continue;
+      if (!e.alive || b.dead) continue;
       if (rectHit({ x: b.x - b.r, y: b.y - b.r, w: b.r * 2, h: b.r * 2 }, e)) {
         e.alive = false;
-        b.dead = true;
-        score += 100;
+        score += 100 + level * 10;
         sfx('hit');
         spawnParticles(e.x + 15, e.y + 15, '#4af', 15);
+        // piercing bombs carry on through a couple of enemies
+        if (b.pierce && ++b.hits < 3) continue;
+        b.dead = true;
       }
     }
   }
   bombs = bombs.filter(b => !b.dead);
 
-  // particles
-  for (const p of particles) {
-    p.vy += 0.25; p.x += p.vx; p.y += p.vy; p.life--;
-  }
+  for (const p of particles) { p.vy += 0.25; p.x += p.vx; p.y += p.vy; p.life--; }
   particles = particles.filter(p => p.life > 0);
 
-  // camera
-  camera.x = Math.max(0, Math.min(LEVEL_END - W, jerry.x - 300));
+  camera.x = Math.max(0, Math.min(d.end - W, jerry.x - 300));
 
-  // goal reached
-  if (jerry.x + jerry.w > goal.x + 10) startBoss();
+  // ---- level complete ----
+  if (jerry.x + jerry.w > goal.x + 10) {
+    if (level >= FINAL_LEVEL) startVillain();
+    else nextLevel();
+  }
 
   if (jerry.invuln > 0) jerry.invuln--;
   if (popup) { popup.timer--; if (popup.timer <= 0) popup = null; }
+}
+
+// Moves on to the next stage, keeping powers and score.
+function nextLevel() {
+  level++;
+  levelReached = Math.max(levelReached, level);
+  score += 500;
+  buildLevel(level);
+  jerry.x = 60; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
+  jerry.invuln = 90;
+  jerry.jumps = 0;
+  camera.x = 0;
+  bombs = [];
+  villainShots = [];
+  particles = [];
+  levelBanner = 150;
+  sfx('power');
 }
 
 function triggerBlock(b) {
@@ -1068,16 +1455,20 @@ function triggerBlock(b) {
   if (b.type === 'filter' || b.type === 'uv') {
     score += 200;
     if (jerry.stage >= 2) {
-      // already armed - a further power block upgrades to rapid fire
-      const wasRapid = jerry.rapidBomb;
+      // already armed: hand out this level's reward power
+      const reward = (levelData || levelDef(level)).power;
       setStage(2);
-      jerry.rapidBomb = true;
-      spawnParticles(b.x + 20, b.y - 10, '#ff8', 14);
-      showPopup(eduText(b.type) +
-        (wasRapid ? ' Bomb recharged!' : ' RAPID BOMBS unlocked!'));
+      spawnParticles(b.x + 20, b.y - 10, '#ff8', 16);
+      if (grantPower(reward) && POWER_INFO[reward]) {
+        powerBanner = { text: POWER_INFO[reward].label + ' UNLOCKED!', timer: 150 };
+        showPopup(eduText(b.type) + ' ' + POWER_INFO[reward].blurb + '!');
+      } else {
+        showPopup(eduText(b.type) + ' Bomb recharged!');
+      }
     } else {
       setStage(jerry.stage + 1);
       spawnParticles(b.x + 20, b.y - 10, jerry.stage === 2 ? '#ff8' : '#fff', 18);
+      if (jerry.stage === 2) grantPower('bomb');
       showPopup(jerry.stage === 1
         ? eduText(b.type) + ' Jerry GREW BIGGER! Hit another power block for water bombs.'
         : eduText(b.type) + ' WATER BOMBS unlocked - press [X] to throw!');
@@ -1090,343 +1481,19 @@ function triggerBlock(b) {
   else if (b.type === 'water') { score += 50; }
 }
 
-// ============ BOSS ============
-function startBoss() {
-  gameState = 'boss';
-  levelReached = Math.max(levelReached, 2);   // cleared level 1
-  jerry.x = 80; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
-  camera.x = 0;
-  bombs = [];
-  bossActiveEnemies = [];
-  // the fight is unwinnable without bombs, so arm Jerry on entry
-  setStage(2);
-  boss = {
-    body: { x: 430, y: 350, w: 320, h: 90 },
-    stacks: [
-      { x: 470, y: 240, w: 55, h: 200, hp: 2, alive: true, id: 'A' },
-      { x: 570, y: 210, w: 55, h: 230, hp: 2, alive: true, id: 'B' },
-      { x: 670, y: 190, w: 55, h: 250, hp: 2, alive: true, id: 'C' },
-    ],
-    smokeTimer: 0,
-  };
-  showPopup('BOSS: The Polluting Factory! Throw water bombs [X] at each smokestack!');
-}
-
-function updateBoss() {
-  let ax = 0;
-  if (keys['arrowleft'] || keys['a']) ax = -MOVE_SPEED;
-  if (keys['arrowright'] || keys['d']) ax = MOVE_SPEED;
-  jerry.vx = ax;
-  if (ax !== 0) jerry.facing = Math.sign(ax);
-
-  if ((keys[' '] || keys['w'] || keys['arrowup']) && jerry.onGround) {
-    jerry.vy = JUMP_POWER;
-    jerry.onGround = false;
-    sfx('jump');
-  }
-
-  if (keys['x'] && jerry.hasBomb && !jerry._xheld) {
-    bombs.push({
-      x: jerry.x + jerry.w / 2, y: jerry.y + jerry.h / 2,
-      vx: jerry.facing * 9, vy: -4, r: 9
-    });
-    jerry._xheld = true;
-    jerry.hasBomb = false;
-    jerry.bombCooldown = jerry.rapidBomb ? BOMB_COOLDOWN / 3 : BOMB_COOLDOWN;
-    sfx('throw');
-  }
-  if (!keys['x']) jerry._xheld = false;
-
-  if (jerry.bombCooldown > 0 && --jerry.bombCooldown === 0) jerry.hasBomb = true;
-
-  jerry.vy = Math.min(15, jerry.vy + GRAVITY);
-  jerry.x += jerry.vx; jerry.y += jerry.vy;
-  jerry.onGround = false;
-
-  // simple ground
-  if (jerry.y + jerry.h >= GROUND_Y) {
-    jerry.y = GROUND_Y - jerry.h;
-    jerry.vy = 0;
-    jerry.onGround = true;
-  }
-  if (jerry.x < 0) jerry.x = 0;
-  if (jerry.x + jerry.w > W) jerry.x = W - jerry.w;
-
-  // factory spawns smoke enemies
-  boss.smokeTimer++;
-  if (boss.smokeTimer > 80) {
-    boss.smokeTimer = 0;
-    const alive = boss.stacks.filter(s => s.alive);
-    if (alive.length > 0) {
-      const s = alive[Math.floor(Math.random() * alive.length)];
-      bossActiveEnemies.push({
-        x: s.x + s.w/2 - 10, y: s.y - 10,
-        w: 20, h: 20,
-        vx: (Math.random() - 0.5) * 4,
-        vy: -4,
-        life: 240, alive: true
-      });
-    }
-  }
-
-  // smoke enemies
-  for (const e of bossActiveEnemies) {
-    if (!e.alive) continue;
-    e.vy += 0.15;
-    e.x += e.vx; e.y += e.vy;
-    e.life--;
-    if (e.life <= 0 || e.y > H) e.alive = false;
-    if (jerry.invuln <= 0 && rectHit(jerry, e)) {
-      damagePlayer();
-      e.alive = false;
-    }
-  }
-  bossActiveEnemies = bossActiveEnemies.filter(e => e.alive);
-
-  // bombs vs stacks
-  for (const b of bombs) {
-    b.vy += GRAVITY * 0.5;
-    b.x += b.vx; b.y += b.vy;
-    if (b.y > H + 50 || b.x < -50 || b.x > W + 50) b.dead = true;
-    for (const s of boss.stacks) {
-      if (!s.alive) continue;
-      if (rectHit({ x: b.x - b.r, y: b.y - b.r, w: b.r * 2, h: b.r * 2 }, s)) {
-        s.hp--;
-        b.dead = true;
-        sfx('hit');
-        spawnParticles(b.x, b.y, '#4af', 15);
-        if (s.hp <= 0) {
-          sfx('boom');
-          s.alive = false;
-          score += 500;
-          spawnParticles(s.x + s.w/2, s.y + 30, '#ff8800', 30);
-          spawnParticles(s.x + s.w/2, s.y + 30, '#fff', 20);
-        }
-      }
-    }
-  }
-  bombs = bombs.filter(b => !b.dead);
-
-  // particles
-  for (const p of particles) {
-    p.vy += 0.25; p.x += p.vx; p.y += p.vy; p.life--;
-  }
-  particles = particles.filter(p => p.life > 0);
-
-  // factory destroyed -> the man behind it shows up
-  if (boss.stacks.every(s => !s.alive)) {
-    startLevel2();
-  }
-
-  if (jerry.invuln > 0) jerry.invuln--;
-  if (popup) { popup.timer--; if (popup.timer <= 0) popup = null; }
-}
-
-// ============ LEVEL 2 ============
-// A tighter, more hostile stretch: toxic barrels roll at Jerry, drones patrol
-// the air, and the ground is broken up by wider sewage pits.
-const L2_END = 2600;
-
-const l2Platforms = [
-  { x: 0,    y: GROUND_Y, w: 520, h: 60, kind: 'ground' },
-  { x: 640,  y: GROUND_Y, w: 420, h: 60, kind: 'ground' },
-  { x: 1180, y: GROUND_Y, w: 380, h: 60, kind: 'ground' },
-  { x: 1700, y: GROUND_Y, w: 340, h: 60, kind: 'ground' },
-  { x: 2160, y: GROUND_Y, w: 640, h: 60, kind: 'ground' },
-  { x: 300,  y: 330, w: 120, h: 18, kind: 'brick' },
-  { x: 700,  y: 300, w: 120, h: 18, kind: 'brick' },
-  { x: 980,  y: 230, w: 100, h: 18, kind: 'brick' },
-  { x: 1250, y: 320, w: 120, h: 18, kind: 'brick' },
-  { x: 1480, y: 240, w: 100, h: 18, kind: 'brick' },
-  { x: 1820, y: 300, w: 120, h: 18, kind: 'brick' },
-  { x: 2260, y: 280, w: 120, h: 18, kind: 'brick' },
-];
-
-const l2Hazards = [
-  { x: 520,  y: GROUND_Y, w: 120, h: 60 },
-  { x: 1060, y: GROUND_Y, w: 120, h: 60 },
-  { x: 1560, y: GROUND_Y, w: 140, h: 60 },
-  { x: 2040, y: GROUND_Y, w: 120, h: 60 },
-];
-
-const l2Goal = { x: L2_END - 160, y: GROUND_Y - 130, w: 40, h: 130 };
-
-function startLevel2() {
-  gameState = 'level2';
-  levelReached = Math.max(levelReached, 3);   // beat the factory boss
-  jerry.x = 60; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
-  jerry.invuln = 90;
-  camera.x = 0;
-  bombs = [];
-  villainShots = [];
-  bossActiveEnemies = [];
-  boss = null;
-
-  blocks = [
-    { x: 340, y: 240, w: 40, h: 40, type: 'water',    hit: false },
-    { x: 740, y: 210, w: 40, h: 40, type: 'uv',       hit: false },
-    { x: 1010,y: 140, w: 40, h: 40, type: 'chlorine', hit: false },
-    { x: 1290,y: 230, w: 40, h: 40, type: 'water',    hit: false },
-    { x: 1510,y: 150, w: 40, h: 40, type: 'filter',   hit: false },
-    { x: 1860,y: 210, w: 40, h: 40, type: 'water',    hit: false },
-    // a late power block so a player who got knocked down can re-arm
-    // before the final boss
-    { x: 2180,y: 300, w: 40, h: 40, type: 'uv',       hit: false },
-    { x: 2300,y: 190, w: 40, h: 40, type: 'chlorine', hit: false },
-  ];
-
-  enemies = [
-    // rolling toxic barrels chase along the ground
-    { x: 420,  y: GROUND_Y - 34, w: 34, h: 34, vx: -1.8, type: 'barrel', alive: true, minX: 60,   maxX: 510 },
-    { x: 900,  y: GROUND_Y - 34, w: 34, h: 34, vx:  1.8, type: 'barrel', alive: true, minX: 650,  maxX: 1050 },
-    { x: 1400, y: GROUND_Y - 34, w: 34, h: 34, vx: -2.0, type: 'barrel', alive: true, minX: 1190, maxX: 1550 },
-    { x: 1900, y: GROUND_Y - 34, w: 34, h: 34, vx:  2.0, type: 'barrel', alive: true, minX: 1710, maxX: 2030 },
-    { x: 2400, y: GROUND_Y - 34, w: 34, h: 34, vx: -2.2, type: 'barrel', alive: true, minX: 2170, maxX: 2600 },
-    // drones hover and bob in the air
-    { x: 800,  y: 250, w: 32, h: 26, vx:  1.6, type: 'drone', alive: true, minX: 660,  maxX: 1040, baseY: 250, phase: 0 },
-    { x: 1350, y: 200, w: 32, h: 26, vx: -1.6, type: 'drone', alive: true, minX: 1200, maxX: 1540, baseY: 200, phase: 1.5 },
-    { x: 1950, y: 240, w: 32, h: 26, vx:  1.8, type: 'drone', alive: true, minX: 1720, maxX: 2030, baseY: 240, phase: 3 },
-    { x: 2450, y: 210, w: 32, h: 26, vx: -1.8, type: 'drone', alive: true, minX: 2180, maxX: 2580, baseY: 210, phase: 4.5 },
-  ];
-
-  signs = [
-    { x: 120,  y: GROUND_Y - 50, text: "A greedy tycoon bought the river. His machines are everywhere. Stay sharp!" },
-    { x: 760,  y: GROUND_Y - 50, text: "DRONES guard his property. Water bombs bring them down." },
-    { x: 1740, y: GROUND_Y - 50, text: "Toxic barrels leak heavy metals like lead and mercury into groundwater." },
-  ];
-  signs.forEach(s => s.shown = false);
-
-  showPopup('LEVEL 2: The tycoon fled upriver. Chase him down and stop him for good!');
-}
-
-function updateLevel2() {
-  let ax = 0;
-  if (keys['arrowleft'] || keys['a']) ax = -MOVE_SPEED;
-  if (keys['arrowright'] || keys['d']) ax = MOVE_SPEED;
-  jerry.vx = ax;
-  if (ax !== 0) jerry.facing = Math.sign(ax);
-
-  if ((keys[' '] || keys['w'] || keys['arrowup']) && jerry.onGround) {
-    jerry.vy = JUMP_POWER;
-    jerry.onGround = false;
-    sfx('jump');
-  }
-
-  if (keys['x'] && jerry.hasBomb && !jerry._xheld) {
-    bombs.push({
-      x: jerry.x + jerry.w / 2, y: jerry.y + jerry.h / 2,
-      vx: jerry.facing * 9, vy: -1.5, r: 8
-    });
-    jerry.hasBomb = false;
-    jerry.bombCooldown = jerry.rapidBomb ? BOMB_COOLDOWN / 3 : BOMB_COOLDOWN;
-    sfx('throw');
-    jerry._xheld = true;
-  }
-  if (!keys['x']) jerry._xheld = false;
-  if (jerry.bombCooldown > 0 && --jerry.bombCooldown === 0) jerry.hasBomb = true;
-
-  jerry.vy = Math.min(15, jerry.vy + GRAVITY);
-  jerry.x += jerry.vx;
-  jerry.y += jerry.vy;
-  jerry.onGround = false;
-  if (jerry.x < 0) jerry.x = 0;
-
-  for (const p of l2Platforms.concat(blocks)) {
-    if (rectHit(jerry, p)) {
-      const prevX = jerry.x - jerry.vx;
-      const prevY = jerry.y - jerry.vy;
-      if (prevY + jerry.h <= p.y + 1) {
-        jerry.y = p.y - jerry.h; jerry.vy = 0; jerry.onGround = true;
-      } else if (prevY >= p.y + p.h - 1) {
-        jerry.y = p.y + p.h; jerry.vy = 1;
-        if (!p.hit && p.type) { p.hit = true; triggerBlock(p); }
-      } else if (prevX + jerry.w <= p.x + 1) {
-        jerry.x = p.x - jerry.w;
-      } else if (prevX >= p.x + p.w - 1) {
-        jerry.x = p.x + p.w;
-      }
-    }
-  }
-
-  for (const e of enemies) {
-    if (!e.alive) continue;
-    e.x += e.vx;
-    if (e.x < e.minX) { e.x = e.minX; e.vx *= -1; }
-    if (e.x + e.w > e.maxX) { e.x = e.maxX - e.w; e.vx *= -1; }
-    if (e.type === 'drone') {
-      e.phase += 0.04;
-      e.y = e.baseY + Math.sin(e.phase) * 26;
-    }
-    if (jerry.invuln <= 0 && rectHit(jerry, e)) {
-      // barrels can be stomped; drones fly too fast and must be bombed
-      if (e.type === 'barrel' && jerry.vy > 1 && (jerry.y + jerry.h - jerry.vy) < e.y + 10) {
-        e.alive = false;
-        jerry.vy = JUMP_POWER * 0.65;
-        score += 150;
-        sfx('hit');
-        spawnParticles(e.x + 17, e.y + 17, '#c04040', 12);
-      } else {
-        damagePlayer();
-      }
-    }
-  }
-
-  for (const h of l2Hazards) {
-    if (jerry.y + jerry.h > h.y + 8 &&
-        jerry.x + jerry.w > h.x + 5 && jerry.x < h.x + h.w - 5) {
-      damagePlayer();
-      break;
-    }
-  }
-
-  if (jerry.y > H + 50) damagePlayer();
-
-  for (const s of signs) {
-    if (s.shown) continue;
-    if (Math.abs((jerry.x + jerry.w/2) - (s.x + 20)) < 40) {
-      s.shown = true;
-      showPopup(s.text);
-    }
-  }
-
-  for (const b of bombs) {
-    b.vy += GRAVITY * 0.5;
-    b.x += b.vx; b.y += b.vy;
-    if (b.y > H + 50 || b.x < -50 || b.x > L2_END + 50) b.dead = true;
-    for (const e of enemies) {
-      if (!e.alive) continue;
-      if (rectHit({ x: b.x - b.r, y: b.y - b.r, w: b.r * 2, h: b.r * 2 }, e)) {
-        e.alive = false;
-        b.dead = true;
-        score += 150;
-        sfx('hit');
-        spawnParticles(e.x + 16, e.y + 13, '#4af', 15);
-      }
-    }
-  }
-  bombs = bombs.filter(b => !b.dead);
-
-  for (const p of particles) { p.vy += 0.25; p.x += p.vx; p.y += p.vy; p.life--; }
-  particles = particles.filter(p => p.life > 0);
-
-  camera.x = Math.max(0, Math.min(L2_END - W, jerry.x - 300));
-
-  if (jerry.x + jerry.w > l2Goal.x + 10) startVillain();
-
-  if (jerry.invuln > 0) jerry.invuln--;
-  if (popup) { popup.timer--; if (popup.timer <= 0) popup = null; }
-}
-
 // ============ FINAL BOSS: THE GREEDY TYCOON ============
 // He walks, jumps, throws money-bags and toxic waste, and calls in drones.
 // Jerry has to dodge and land 6 bombs while staying alive.
 function startVillain() {
   gameState = 'villain';
-  levelReached = Math.max(levelReached, 4);   // reached the final boss
+  levelReached = FINAL_LEVEL + 1;   // 9 = reached the final boss
   jerry.x = 70; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
   jerry.invuln = 90;
+  jerry.jumps = 0;
+  levelBanner = 0;
   // bombs are the only way to hurt him, so make sure Jerry has them
   setStage(2);
+  grantPower('bomb');
   camera.x = 0;
   bombs = [];
   villainShots = [];
@@ -1436,7 +1503,7 @@ function startVillain() {
   villain = {
     x: 600, y: GROUND_Y - 96, w: 54, h: 96,
     vx: -1.9, vy: 0, onGround: true,
-    hp: 6, maxHp: 6,
+    hp: 12, maxHp: 12,   // tougher: by now Jerry has every power unlocked
     hurt: 0,          // flash timer after taking a hit
     attackTimer: 90,  // frames until next attack
     phase: 1,         // gets more aggressive as hp drops
@@ -1453,24 +1520,26 @@ function updateVillain() {
   jerry.vx = ax;
   if (ax !== 0) jerry.facing = Math.sign(ax);
 
-  if ((keys[' '] || keys['w'] || keys['arrowup']) && jerry.onGround) {
-    jerry.vy = JUMP_POWER;
+  const jumpKey = keys[' '] || keys['w'] || keys['arrowup'];
+  const maxJumps = hasPower('doublejump') ? 2 : 1;
+  if (jumpKey && !jerry._jumpHeld && jerry.jumps < maxJumps) {
+    jerry.vy = JUMP_POWER * (jerry.jumps === 0 ? 1 : 0.88);
     jerry.onGround = false;
+    jerry.jumps++;
     sfx('jump');
   }
+  jerry._jumpHeld = jumpKey;
 
   if (keys['x'] && jerry.hasBomb && !jerry._xheld) {
-    bombs.push({
-      x: jerry.x + jerry.w / 2, y: jerry.y + jerry.h / 2,
-      vx: jerry.facing * 9, vy: -2, r: 9
-    });
-    jerry.hasBomb = false;
-    jerry.bombCooldown = jerry.rapidBomb ? BOMB_COOLDOWN / 3 : BOMB_COOLDOWN;
-    sfx('throw');
+    throwBombs(9);
     jerry._xheld = true;
   }
   if (!keys['x']) jerry._xheld = false;
   if (jerry.bombCooldown > 0 && --jerry.bombCooldown === 0) jerry.hasBomb = true;
+
+  if (hasPower('shield') && !jerry.shield) {
+    if (--jerry.shieldCd <= 0) { jerry.shield = true; jerry.shieldCd = 0; }
+  }
 
   jerry.vy = Math.min(15, jerry.vy + GRAVITY);
   jerry.x += jerry.vx; jerry.y += jerry.vy;
@@ -1487,7 +1556,8 @@ function updateVillain() {
     if (rectHit(jerry, p)) {
       const prevY = jerry.y - jerry.vy;
       if (prevY + jerry.h <= p.y + 1) {
-        jerry.y = p.y - jerry.h; jerry.vy = 0; jerry.onGround = true;
+        jerry.y = p.y - jerry.h; jerry.vy = 0;
+        jerry.onGround = true; jerry.jumps = 0;
       }
     }
   }
@@ -1496,7 +1566,7 @@ function updateVillain() {
 
   // ---- villain AI ----
   const v = villain;
-  v.phase = v.hp <= 2 ? 3 : (v.hp <= 4 ? 2 : 1);
+  v.phase = v.hp <= v.maxHp / 3 ? 3 : (v.hp <= v.maxHp * 2 / 3 ? 2 : 1);
 
   // pace back and forth, turning at the arena edges
   v.x += v.vx;
@@ -1607,32 +1677,25 @@ function updateVillain() {
 // ============ RENDER ============
 function drawSky() {
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  if (gameState === 'boss') {
-    g.addColorStop(0, '#4a2540');
-    g.addColorStop(0.5, '#8b4a3a');
-    g.addColorStop(1, '#c47a4a');
-  } else if (gameState === 'villain') {
+  if (gameState === 'villain') {
     // stormy showdown sky
     g.addColorStop(0, '#1a1030');
     g.addColorStop(0.55, '#4a2a50');
     g.addColorStop(1, '#8a4a5a');
-  } else if (gameState === 'level2') {
-    // polluted haze
-    g.addColorStop(0, '#7a86a8');
-    g.addColorStop(0.6, '#b9a48c');
-    g.addColorStop(1, '#d8c4a0');
   } else {
-    g.addColorStop(0, '#6bd6ff');
-    g.addColorStop(1, '#c9f2ff');
+    // each level fades a little dirtier than the last
+    const sky = (levelData || levelDef(level)).sky;
+    g.addColorStop(0, sky[0]);
+    g.addColorStop(1, sky[1]);
   }
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 }
 
 function drawClouds() {
-  const dark = gameState === 'boss' || gameState === 'villain';
-  ctx.fillStyle = dark ? 'rgba(80,40,30,0.6)'
-    : gameState === 'level2' ? 'rgba(120,110,100,0.55)'
+  const dark = gameState === 'villain' || level >= 6;
+  ctx.fillStyle = dark ? 'rgba(80,40,30,0.55)'
+    : level >= 3 ? 'rgba(120,110,100,0.55)'
     : 'rgba(255,255,255,0.75)';
   const off = (camera.x * 0.3) % 240;
   for (let i = -1; i < 6; i++) {
@@ -1646,20 +1709,28 @@ function drawClouds() {
   }
 }
 
+// Ground palettes per level theme: healthy grass turns to ash further in.
+const GROUND_STYLE = {
+  grass: { top: '#5a8c3a', tuft: '#7cb85a', soil: '#6b3d1a', dark: '#553015' },
+  dead:  { top: '#6b6a45', tuft: '#8a8558', soil: '#5c4a2a', dark: '#42331b' },
+  rust:  { top: '#7a5a44', tuft: '#94705a', soil: '#4f3524', dark: '#382417' },
+  ash:   { top: '#4f4a52', tuft: '#6b6470', soil: '#332f38', dark: '#221f28' },
+};
+
 function drawGround(list) {
-  // level 2 ground is scorched rather than green
-  const dead = gameState === 'level2';
+  const theme = (levelData || levelDef(level)).ground || 'grass';
+  const c = GROUND_STYLE[theme] || GROUND_STYLE.grass;
   for (const p of (list || platforms)) {
     if (p.kind === 'ground') {
-      ctx.fillStyle = dead ? '#6b6a45' : '#5a8c3a';
+      ctx.fillStyle = c.top;
       ctx.fillRect(p.x, p.y, p.w, 10);
-      ctx.fillStyle = dead ? '#8a8558' : '#7cb85a';
+      ctx.fillStyle = c.tuft;
       for (let i = 0; i < p.w; i += 12) {
         ctx.fillRect(p.x + i, p.y - 3, 8, 5);
       }
-      ctx.fillStyle = '#6b3d1a';
+      ctx.fillStyle = c.soil;
       ctx.fillRect(p.x, p.y + 10, p.w, p.h - 10);
-      ctx.fillStyle = '#553015';
+      ctx.fillStyle = c.dark;
       for (let i = 0; i < p.w; i += 30) {
         ctx.fillRect(p.x + i, p.y + 18, 3, 18);
         ctx.fillRect(p.x + i + 15, p.y + 32, 3, 15);
@@ -1831,29 +1902,117 @@ function drawEnemies() {
       ctx.beginPath(); ctx.arc(ex, e.y + 14, 4, 0, Math.PI*2); ctx.fill();
       ctx.fillStyle = 'rgba(255,60,60,0.35)';
       ctx.beginPath(); ctx.arc(ex, e.y + 14, 7, 0, Math.PI*2); ctx.fill();
+
+    } else if (e.type === 'spitter') {
+      // squat sludge pipe that shoots at Jerry
+      const about = e.fireTimer < 25;
+      ctx.fillStyle = '#4a5a3a';
+      ctx.fillRect(e.x, e.y + 10, e.w, e.h - 10);
+      ctx.strokeStyle = '#26301c'; ctx.lineWidth = 2;
+      ctx.strokeRect(e.x, e.y + 10, e.w, e.h - 10);
+      // nozzle, pointing the way it will fire
+      const dir = (jerry.x > e.x) ? 1 : -1;
+      ctx.fillStyle = '#33402a';
+      ctx.fillRect(dir > 0 ? e.x + e.w - 4 : e.x - 8, e.y + 14, 12, 9);
+      // glowing charge before it spits
+      ctx.fillStyle = about ? '#cfff5a' : '#7aa83a';
+      ctx.beginPath();
+      ctx.arc(e.x + e.w / 2, e.y + 8, about ? 8 : 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#1e2a14';
+      ctx.fillRect(e.x + 8, e.y + 22, 5, 5);
+      ctx.fillRect(e.x + e.w - 13, e.y + 22, 5, 5);
+
+    } else if (e.type === 'chaser') {
+      // hungry blob that runs at you
+      const wob = Math.sin(Date.now() * 0.012 + e.x * 0.05) * 2;
+      ctx.fillStyle = '#7a2a5a';
+      ctx.beginPath();
+      ctx.ellipse(e.x + e.w / 2, e.y + e.h / 2 + wob, e.w / 2, e.h / 2 - 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#43102f'; ctx.lineWidth = 2; ctx.stroke();
+      // legs
+      ctx.fillStyle = '#43102f';
+      for (let i = 0; i < 3; i++) {
+        const lx = e.x + 6 + i * 9;
+        ctx.fillRect(lx, e.y + e.h - 4, 3, 5 + Math.sin(Date.now() * 0.02 + i) * 2);
+      }
+      // eyes track Jerry
+      const look = jerry.x > e.x ? 3 : -3;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(e.x + 11, e.y + 13 + wob, 5, 0, Math.PI * 2);
+      ctx.arc(e.x + e.w - 11, e.y + 13 + wob, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#a00';
+      ctx.beginPath();
+      ctx.arc(e.x + 11 + look, e.y + 14 + wob, 2.5, 0, Math.PI * 2);
+      ctx.arc(e.x + e.w - 11 + look, e.y + 14 + wob, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      // teeth
+      ctx.fillStyle = '#fff';
+      for (let i = 0; i < 4; i++) ctx.fillRect(e.x + 8 + i * 5, e.y + 22 + wob, 3, 4);
     }
   }
 }
 
-// ============ LEVEL 2 / VILLAIN RENDER ============
-function drawL2Goal() {
-  const g = l2Goal;
-  ctx.fillStyle = '#a33';
-  ctx.fillRect(g.x, g.y, g.w, g.h);
-  ctx.fillStyle = '#d55';
-  ctx.fillRect(g.x - 10, g.y, g.w + 20, 20);
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 11px monospace';
-  ctx.fillText('TYCOON', g.x - 8, g.y - 8);
-  ctx.fillStyle = '#fbb';
-  for (let i = 0; i < 4; i++) {
-    const t = (Date.now() * 0.003 + i * 0.4) % 1;
-    ctx.globalAlpha = 1 - t;
-    ctx.fillRect(g.x + 8, g.y + 30 + t * 80, 24, 4);
+// Sludge fired by spitters (reuses the villain's projectile list).
+function drawEnemyShots() {
+  for (const s of villainShots) {
+    ctx.fillStyle = 'rgba(120,200,40,0.9)';
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#3a6b10'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = 'rgba(200,255,120,0.9)';
+    ctx.beginPath(); ctx.arc(s.x - 3, s.y - 3, s.r * 0.35, 0, Math.PI * 2); ctx.fill();
   }
-  ctx.globalAlpha = 1;
 }
 
+// "LEVEL n - NAME" card when a stage starts, and power unlock toasts.
+function drawLevelBanner() {
+  if (levelBanner > 0) {
+    levelBanner--;
+    const d = levelDef(level);
+    const a = Math.min(1, levelBanner / 40);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0,10,25,0.8)';
+    ctx.fillRect(0, H / 2 - 52, W, 96);
+    ctx.strokeStyle = '#4af'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, H / 2 - 52); ctx.lineTo(W, H / 2 - 52);
+    ctx.moveTo(0, H / 2 + 44); ctx.lineTo(W, H / 2 + 44);
+    ctx.stroke();
+    ctx.fillStyle = '#4af';
+    ctx.font = 'bold 34px monospace';
+    ctx.fillText('LEVEL ' + level, W / 2, H / 2 - 10);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText(d.name, W / 2, H / 2 + 20);
+    ctx.restore();
+    ctx.textAlign = 'left';
+  }
+
+  if (powerBanner) {
+    powerBanner.timer--;
+    if (powerBanner.timer <= 0) { powerBanner = null; return; }
+    const a = Math.min(1, powerBanner.timer / 30);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(40,30,0,0.85)';
+    ctx.fillRect(W / 2 - 190, 150, 380, 44);
+    ctx.strokeStyle = '#ffd94a'; ctx.lineWidth = 3;
+    ctx.strokeRect(W / 2 - 190, 150, 380, 44);
+    ctx.fillStyle = '#ffd94a';
+    ctx.font = 'bold 19px monospace';
+    ctx.fillText('★ ' + powerBanner.text + ' ★', W / 2, 179);
+    ctx.restore();
+    ctx.textAlign = 'left';
+  }
+}
+
+// ============ LEVEL 2 / VILLAIN RENDER ============
 function drawVillain() {
   const v = villain;
   // flash white when he has just been hit
@@ -2140,112 +2299,6 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
-function drawBossScene() {
-  // ground
-  ctx.fillStyle = '#5a4a3a';
-  ctx.fillRect(0, GROUND_Y, W, 60);
-  ctx.fillStyle = '#3a2a1a';
-  ctx.fillRect(0, GROUND_Y, W, 6);
-  // toxic puddles on ground
-  for (let i = 0; i < 5; i++) {
-    ctx.fillStyle = 'rgba(120,90,20,0.6)';
-    ctx.beginPath();
-    ctx.ellipse(80 + i * 150, GROUND_Y + 15, 30, 4, 0, 0, Math.PI*2);
-    ctx.fill();
-  }
-
-  // factory body
-  const b = boss.body;
-  ctx.fillStyle = '#606060';
-  ctx.fillRect(b.x, b.y, b.w, b.h);
-  ctx.fillStyle = '#404040';
-  ctx.fillRect(b.x, b.y, b.w, 10);
-  ctx.strokeStyle = '#303030';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(b.x, b.y, b.w, b.h);
-  // windows
-  for (let i = 0; i < 6; i++) {
-    ctx.fillStyle = '#ff9';
-    ctx.fillRect(b.x + 15 + i * 50, b.y + 25, 22, 22);
-    ctx.strokeStyle = '#000';
-    ctx.strokeRect(b.x + 15 + i * 50, b.y + 25, 22, 22);
-    ctx.beginPath();
-    ctx.moveTo(b.x + 26 + i * 50, b.y + 25);
-    ctx.lineTo(b.x + 26 + i * 50, b.y + 47);
-    ctx.moveTo(b.x + 15 + i * 50, b.y + 36);
-    ctx.lineTo(b.x + 37 + i * 50, b.y + 36);
-    ctx.stroke();
-  }
-  // door
-  ctx.fillStyle = '#3a2a1a';
-  ctx.fillRect(b.x + b.w/2 - 18, b.y + 55, 36, 35);
-  ctx.fillStyle = '#ff0';
-  ctx.font = 'bold 10px monospace';
-  ctx.fillText('MEGA-POLLUTE INC.', b.x + 90, b.y - 5);
-
-  // smokestacks
-  for (const s of boss.stacks) {
-    if (!s.alive) {
-      // rubble
-      ctx.fillStyle = '#404040';
-      ctx.beginPath();
-      ctx.moveTo(s.x, s.y + s.h);
-      ctx.lineTo(s.x + 10, s.y + s.h - 25);
-      ctx.lineTo(s.x + s.w/2, s.y + s.h - 15);
-      ctx.lineTo(s.x + s.w - 10, s.y + s.h - 30);
-      ctx.lineTo(s.x + s.w, s.y + s.h);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = '#202020';
-      ctx.stroke();
-      continue;
-    }
-    ctx.fillStyle = '#505050';
-    ctx.fillRect(s.x, s.y, s.w, s.h);
-    ctx.strokeStyle = '#303030';
-    ctx.strokeRect(s.x, s.y, s.w, s.h);
-    ctx.fillStyle = '#303030';
-    ctx.fillRect(s.x - 3, s.y, s.w + 6, 10);
-    ctx.fillRect(s.x, s.y + 20, s.w, 3);
-    // hp bar
-    ctx.fillStyle = '#000';
-    ctx.fillRect(s.x + 8, s.y + s.h/2 - 3, s.w - 16, 10);
-    ctx.fillStyle = s.hp === 2 ? '#0f0' : '#f80';
-    ctx.fillRect(s.x + 10, s.y + s.h/2 - 1, (s.w - 20) * (s.hp / 2), 6);
-
-    // black smoke coming out
-    for (let i = 0; i < 4; i++) {
-      const t = (Date.now() * 0.001 + i * 0.7) % 3;
-      ctx.fillStyle = `rgba(40,30,25,${0.8 - t/3})`;
-      ctx.beginPath();
-      ctx.arc(s.x + s.w/2 + Math.sin(t*3)*8, s.y - t * 25, 10 + t * 5, 0, Math.PI*2);
-      ctx.fill();
-    }
-  }
-
-  // smoke monsters
-  for (const e of bossActiveEnemies) {
-    if (!e.alive) continue;
-    ctx.fillStyle = '#3a3020';
-    ctx.beginPath();
-    ctx.arc(e.x + 10, e.y + 10, 12, 0, Math.PI*2);
-    ctx.fill();
-    ctx.fillStyle = '#ff4';
-    ctx.fillRect(e.x + 4, e.y + 6, 4, 4);
-    ctx.fillRect(e.x + 12, e.y + 6, 4, 4);
-    ctx.fillStyle = '#000';
-    ctx.fillRect(e.x + 5, e.y + 7, 2, 2);
-    ctx.fillRect(e.x + 13, e.y + 7, 2, 2);
-    // angry mouth
-    ctx.strokeStyle = '#000';
-    ctx.beginPath();
-    ctx.moveTo(e.x + 6, e.y + 15);
-    ctx.lineTo(e.x + 10, e.y + 13);
-    ctx.lineTo(e.x + 14, e.y + 15);
-    ctx.stroke();
-  }
-}
-
 function drawHUD() {
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.fillRect(0, 0, W, 36);
@@ -2254,43 +2307,102 @@ function drawHUD() {
   ctx.strokeRect(0, 0, W, 36);
   ctx.fillStyle = '#4af';
   ctx.font = 'bold 14px monospace';
-  ctx.fillText('◆ JERRY THE WATER SAVIOUR', 15, 23);
+  ctx.fillText('◆ JERRY', 15, 23);
   ctx.fillStyle = '#fff';
-  ctx.fillText('SCORE ' + score, 340, 23);
-  ctx.fillText('LIVES ', 470, 23);
-  for (let i = 0; i < lives; i++) {
-    drawMiniDroplet(535 + i * 22, 15);
+  ctx.fillText('SCORE ' + score, 110, 23);
+  ctx.fillText('LIVES', 265, 23);
+  for (let i = 0; i < Math.min(lives, 6); i++) {
+    drawMiniDroplet(325 + i * 20, 15);
   }
+  if (lives > 6) {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText('x' + lives, 325 + 6 * 20, 23);
+  }
+
   // powerup stage: no bomb until Jerry has hit two power blocks
+  ctx.font = 'bold 14px monospace';
   if (jerry.stage < 2) {
     ctx.fillStyle = '#789';
-    ctx.fillText(jerry.stage === 0 ? 'HIT ? BLOCKS' : 'BIG! ONE MORE ?', 640, 23);
+    ctx.fillText(jerry.stage === 0 ? 'HIT ? BLOCKS' : 'BIG! ONE MORE ?', 470, 23);
   } else if (jerry.hasBomb) {
-    ctx.fillStyle = jerry.rapidBomb ? '#ff8' : '#4af';
-    ctx.fillText(jerry.rapidBomb ? '[X] RAPID!' : '[X] BOMB', 655, 23);
+    ctx.fillStyle = hasPower('overdrive') ? '#f9a'
+      : hasPower('rapid') ? '#ff8' : '#4af';
+    ctx.fillText('[X] BOMB', 470, 23);
   } else {
     ctx.fillStyle = '#567';
-    ctx.fillText('[X] ...', 655, 23);
+    ctx.fillText('[X] ...', 470, 23);
   }
-  // level name on the second row, clear of the bomb indicator above it
-  ctx.font = 'bold 12px monospace';
-  ctx.fillStyle = '#8bc';
-  const label = gameState === 'level2' ? 'LEVEL 2'
-    : gameState === 'villain' ? 'FINAL BOSS'
-    : gameState === 'boss' ? 'LEVEL 1 - BOSS'
-    : 'LEVEL 1';
-  ctx.fillText(label, W - 130, 55);
 
-  // keep boss status on the HUD strip, not at the bottom edge where it hides
-  if (gameState === 'boss') {
-    const alive = boss.stacks.filter(s => s.alive).length;
-    ctx.fillStyle = '#f44';
-    ctx.font = 'bold 14px monospace';
-    ctx.fillText('BOSS  STACKS LEFT: ' + alive + '/3', 15, 55);
-  } else if (gameState === 'villain' && villain) {
+  // run timer - this is what settles a tied score
+  if (runStartedAt) {
+    const ms = scoreSubmitted ? runDurationMs : Date.now() - runStartedAt;
+    ctx.fillStyle = '#9fd';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText('⏱ ' + fmtTime(ms), 600, 23);
+  }
+
+  // level number and name, top-right
+  ctx.font = 'bold 12px monospace';
+  ctx.textAlign = 'right';
+  if (gameState === 'villain') {
+    ctx.fillStyle = '#f88';
+    ctx.fillText('FINAL BOSS', W - 118, 16);
+  } else {
+    const d = levelData || levelDef(level);
+    ctx.fillStyle = '#8bc';
+    ctx.fillText('LEVEL ' + level + '/' + FINAL_LEVEL, W - 118, 16);
+    ctx.fillStyle = '#567';
+    ctx.font = '10px monospace';
+    ctx.fillText(d.name, W - 118, 29);
+  }
+  ctx.textAlign = 'left';
+
+  // second row: unlocked powers, and the boss health when fighting
+  if (gameState === 'villain' && villain) {
     ctx.fillStyle = '#f66';
     ctx.font = 'bold 14px monospace';
     ctx.fillText('THE GREEDY TYCOON  HP: ' + villain.hp + '/' + villain.maxHp, 15, 55);
+  } else {
+    drawPowerStrip(15, 46);
+  }
+
+  // shield bubble indicator
+  if (hasPower('shield')) {
+    const ready = jerry.shield;
+    ctx.strokeStyle = ready ? '#6ef' : 'rgba(110,238,255,0.25)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(W - 30, 55, 9, 0, Math.PI * 2);
+    ctx.stroke();
+    if (!ready) {
+      ctx.fillStyle = '#456';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(Math.ceil(jerry.shieldCd / 60) + 's', W - 30, 58);
+      ctx.textAlign = 'left';
+    }
+  }
+}
+
+// Little chips showing which powers are active this run.
+function drawPowerStrip(x, y) {
+  const order = ['bomb', 'rapid', 'triple', 'doublejump', 'shield', 'pierce', 'blast', 'overdrive'];
+  const icons = { bomb: 'B', rapid: 'R', triple: '3', doublejump: '↑↑', shield: 'S', pierce: 'P', blast: '*', overdrive: 'OD' };
+  let cx = x;
+  ctx.font = 'bold 10px monospace';
+  for (const p of order) {
+    if (!jerry.powers.has(p)) continue;
+    const label = icons[p];
+    const w = label.length > 1 ? 24 : 18;
+    ctx.fillStyle = 'rgba(74,175,255,0.22)';
+    ctx.fillRect(cx, y, w, 15);
+    ctx.strokeStyle = '#4af';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx, y, w, 15);
+    ctx.fillStyle = '#cfe9ff';
+    ctx.fillText(label, cx + (w - label.length * 6) / 2, y + 11);
+    cx += w + 4;
   }
 }
 
@@ -2359,58 +2471,83 @@ function wrapText(text, x, y, maxW, lh) {
   return lines.length * lh;
 }
 
-const LEVEL_NAMES = { 1: 'Level 1', 2: 'L1 Boss', 3: 'Level 2', 4: 'Final Boss' };
+// 1..8 are the stages, 9 means they reached the Greedy Tycoon.
+function levelLabel(n) {
+  const v = Number(n) || 1;
+  return v > FINAL_LEVEL ? 'Final Boss' : 'Level ' + Math.min(v, FINAL_LEVEL);
+}
 
 function drawLeaderboard() {
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#05203f');
-  g.addColorStop(1, '#0b3f6e');
+  g.addColorStop(0, '#04182f');
+  g.addColorStop(1, '#0a3a63');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 
+  // faint moving water bands for depth
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = `rgba(74,175,255,${0.04 + i * 0.02})`;
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x <= W; x += 16) {
+      ctx.lineTo(x, H - 40 - i * 26 + Math.sin((x + Date.now() * 0.0006 + i * 2) * 0.012) * 9);
+    }
+    ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+  }
+
   ctx.textAlign = 'center';
   ctx.fillStyle = '#ffd94a';
-  ctx.font = 'bold 30px monospace';
-  ctx.fillText('★ LEADERBOARD ★', W / 2, 46);
+  ctx.font = 'bold 28px monospace';
+  ctx.fillText('★ LEADERBOARD ★', W / 2, 40);
+  ctx.fillStyle = '#6a8fb0';
+  ctx.font = '10px monospace';
+  ctx.fillText('ties are broken by the faster run', W / 2, 56);
 
   // ---- your own card ----
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.fillRect(40, 62, W - 80, 54);
+  const cardY = 66;
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(40, cardY, W - 80, 56);
   ctx.strokeStyle = '#4af';
   ctx.lineWidth = 2;
-  ctx.strokeRect(40, 62, W - 80, 54);
+  ctx.strokeRect(40, cardY, W - 80, 56);
 
   ctx.textAlign = 'left';
   ctx.fillStyle = '#4af';
   ctx.font = 'bold 15px monospace';
-  ctx.fillText(profile.name || 'PLAYER', 56, 84);
+  ctx.fillText(profile.name || 'PLAYER', 56, cardY + 21);
   ctx.fillStyle = '#cfe9ff';
-  ctx.font = '13px monospace';
-  ctx.fillText('Best ' + profile.bestScore, 56, 104);
-  ctx.fillText('Games ' + profile.gamesPlayed, 190, 104);
-  ctx.fillText('Reached ' + (LEVEL_NAMES[profile.bestLevel] || 'Level 1'), 320, 104);
+  ctx.font = '12px monospace';
+  ctx.fillText('BEST ' + profile.bestScore, 56, cardY + 41);
+  ctx.fillText('GAMES ' + profile.gamesPlayed, 176, cardY + 41);
+  ctx.fillText('REACHED ' + levelLabel(profile.bestLevel), 286, cardY + 41);
+  if (profile.bestTimeMs) {
+    ctx.fillStyle = '#9fd';
+    ctx.fillText('TIME ' + fmtTime(profile.bestTimeMs), 448, cardY + 41);
+  }
   if (profile.rank) {
     // kept clear of the sound button that floats over the top-right corner
     ctx.textAlign = 'right';
     ctx.fillStyle = '#ffd94a';
-    ctx.font = 'bold 20px monospace';
-    ctx.fillText('#' + profile.rank, W - 110, 92);
+    ctx.font = 'bold 22px monospace';
+    ctx.fillText('#' + profile.rank, W - 112, cardY + 28);
     ctx.fillStyle = '#8bc';
     ctx.font = '11px monospace';
-    ctx.fillText('of ' + profile.totalPlayers, W - 110, 108);
+    ctx.fillText('of ' + profile.totalPlayers, W - 112, cardY + 44);
   }
 
   // ---- ranking table ----
+  const tableR = W - 214;
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#8bc';
-  ctx.font = 'bold 11px monospace';
-  ctx.fillText('#',      56,  138);
-  ctx.fillText('PLAYER', 92,  138);
-  ctx.fillText('SCORE',  300, 138);
-  ctx.fillText('LEVEL',  400, 138);
-  ctx.strokeStyle = 'rgba(74,175,255,0.4)';
+  ctx.fillStyle = '#7e9fbb';
+  ctx.font = 'bold 10px monospace';
+  ctx.fillText('#',      56,  142);
+  ctx.fillText('PLAYER', 88,  142);
+  ctx.fillText('SCORE',  268, 142);
+  ctx.fillText('TIME',   360, 142);
+  ctx.fillText('LEVEL',  440, 142);
+  ctx.strokeStyle = 'rgba(74,175,255,0.35)';
   ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(50, 144); ctx.lineTo(W - 220, 144); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(50, 148); ctx.lineTo(tableR, 148); ctx.stroke();
 
   const rows = leaderboard.rows.slice(0, 11);
   if (!rows.length) {
@@ -2418,52 +2555,59 @@ function drawLeaderboard() {
     ctx.font = '13px monospace';
     ctx.fillText(leaderboard.status === 'offline'
       ? 'Server offline - scores saved on this device.'
-      : 'No scores yet. Be the first!', 56, 176);
+      : 'No scores yet. Be the first!', 56, 178);
   }
+
+  const MEDAL = ['#ffd94a', '#d8d8d8', '#cd8b4a'];
   rows.forEach((r, i) => {
-    const y = 164 + i * 25;
+    const y = 168 + i * 24;
     const me = r.id === profile.id;
     if (me) {
-      ctx.fillStyle = 'rgba(74,175,255,0.18)';
-      ctx.fillRect(50, y - 14, W - 270, 22);
+      ctx.fillStyle = 'rgba(74,175,255,0.20)';
+      ctx.fillRect(50, y - 13, tableR - 50, 21);
+      ctx.fillStyle = '#4af';
+      ctx.fillRect(50, y - 13, 3, 21);
     }
-    ctx.fillStyle = i === 0 ? '#ffd94a' : i === 1 ? '#d8d8d8' : i === 2 ? '#cd8b4a' : '#8bc';
     ctx.font = 'bold 13px monospace';
-    ctx.fillText(String(r.rank), 56, y);
+    ctx.fillStyle = MEDAL[i] || '#7e9fbb';
+    ctx.fillText(i < 3 ? ['1', '2', '3'][i] : String(r.rank), 56, y);
     ctx.fillStyle = me ? '#fff' : '#cfe9ff';
-    ctx.fillText(r.name, 92, y);
+    ctx.fillText(r.name, 88, y);
     ctx.fillStyle = '#fff';
-    ctx.fillText(String(r.score), 300, y);
-    ctx.fillStyle = '#8bc';
-    ctx.font = '11px monospace';
-    ctx.fillText(LEVEL_NAMES[r.level] || 'Level 1', 400, y);
+    ctx.fillText(String(r.score), 268, y);
+    // the deciding number when scores are level
+    ctx.fillStyle = '#9fd';
+    ctx.font = '12px monospace';
+    ctx.fillText(fmtTime(r.durationMs), 360, y);
+    ctx.fillStyle = '#7e9fbb';
+    ctx.font = '10px monospace';
+    ctx.fillText(levelLabel(r.level), 440, y);
   });
 
   // ---- your recent games ----
-  const px = W - 200;
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fillRect(px - 12, 138, 176, 292);
+  const px = W - 196;
+  ctx.fillStyle = 'rgba(0,0,0,0.34)';
+  ctx.fillRect(px - 12, 132, 176, 300);
+  ctx.strokeStyle = 'rgba(74,175,255,0.25)';
+  ctx.strokeRect(px - 12, 132, 176, 300);
   ctx.fillStyle = '#4af';
-  ctx.font = 'bold 12px monospace';
-  ctx.fillText('YOUR LAST GAMES', px, 158);
-  ctx.font = '11px monospace';
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('YOUR LAST GAMES', px, 152);
   if (!profile.history.length) {
-    ctx.fillStyle = '#678';
-    ctx.fillText('No games yet', px, 182);
+    ctx.fillStyle = '#5d7a94';
+    ctx.font = '11px monospace';
+    ctx.fillText('No games yet', px, 176);
   }
-  profile.history.slice(0, 9).forEach((h, i) => {
-    const y = 182 + i * 26;
+  profile.history.slice(0, 10).forEach((h, i) => {
+    const y = 174 + i * 25;
     ctx.fillStyle = '#cfe9ff';
     ctx.font = 'bold 12px monospace';
     ctx.fillText(String(h.score), px, y);
-    ctx.fillStyle = '#678';
+    ctx.fillStyle = '#9fd';
     ctx.font = '10px monospace';
-    ctx.fillText(LEVEL_NAMES[h.level] || 'Level 1', px + 62, y);
-    if (h.playedAt) {
-      const d = new Date(h.playedAt);
-      if (!isNaN(d)) ctx.fillText(
-        d.getDate() + '/' + (d.getMonth() + 1), px + 128, y);
-    }
+    ctx.fillText(fmtTime(h.durationMs), px + 58, y);
+    ctx.fillStyle = '#5d7a94';
+    ctx.fillText(levelLabel(h.level), px + 104, y);
   });
 
   ctx.textAlign = 'center';
@@ -2471,7 +2615,7 @@ function drawLeaderboard() {
   ctx.font = '10px monospace';
   ctx.fillText(leaderboard.status === 'offline'
     ? 'offline - run  node server.js  to share scores'
-    : 'synced with media/scores.csv', W / 2, H - 34);
+    : 'synced with media/scores.csv', W / 2, H - 32);
 
   ctx.fillStyle = '#0f0';
   ctx.font = 'bold 15px monospace';
@@ -2581,7 +2725,7 @@ function drawMenu() {
   ctx.fillText('FILTER · CHLORINE · UV LIGHT', W/2, 375);
   ctx.fillStyle = '#fff';
   ctx.fillStyle = '#f88';
-  ctx.fillText('2 LEVELS + the Greedy Tycoon final boss!', W/2, 400);
+  ctx.fillText(FINAL_LEVEL + ' LEVELS + the Greedy Tycoon final boss!', W/2, 400);
 
   // greet a player we already know, with their record so far
   if (profile.id && profile.name) {
@@ -2616,6 +2760,10 @@ function drawGameOver() {
   ctx.font = '13px monospace';
   ctx.fillStyle = '#8bc';
   ctx.fillText('But Jerry never gives up.', W/2, H/2 + 40);
+  ctx.fillStyle = '#cfe9ff';
+  ctx.font = 'bold 14px monospace';
+  ctx.fillText('SCORE ' + score + '   ·   LEVEL ' + Math.min(levelReached, FINAL_LEVEL) +
+               '   ·   TIME ' + fmtTime(runDurationMs), W/2, H/2 + 64);
   ctx.fillStyle = '#0f0';
   ctx.font = 'bold 16px monospace';
   if (Math.floor(Date.now() / 500) % 2) {
@@ -2682,7 +2830,10 @@ function drawWin() {
   ctx.textAlign = 'center';
   ctx.fillStyle = '#ff0';
   ctx.font = 'bold 22px monospace';
-  ctx.fillText('FINAL SCORE: ' + score, W/2, 395);
+  ctx.fillText('FINAL SCORE: ' + score, W/2, 392);
+  ctx.fillStyle = '#9fd';
+  ctx.font = 'bold 13px monospace';
+  ctx.fillText('TIME ' + fmtTime(runDurationMs) + '   ·   ties go to the faster run', W/2, 414);
 
   ctx.fillStyle = '#0f0';
   ctx.font = 'bold 15px monospace';
@@ -2695,7 +2846,12 @@ function drawWin() {
 // ============ RESET ============
 function fullReset() {
   score = 0; lives = 3;
-  jerry.x = 100; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
+  level = 1;
+  jerry.x = 60; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
+  jerry.powers.clear();          // powers are earned again each run
+  jerry.shield = false;
+  jerry.shieldCd = 0;
+  jerry.jumps = 0;
   setStage(0);   // start small, no bomb - power blocks earn it
   jerry.invuln = 60; jerry.facing = 1;
   camera.x = 0;
@@ -2707,7 +2863,9 @@ function fullReset() {
   villain = null;
   villainShots = [];
   screenShake = 0;
-  resetLevel();
+  levelBanner = 0;
+  powerBanner = null;
+  buildLevel(level);
 }
 
 // ============ MAIN LOOP ============
@@ -2726,15 +2884,7 @@ function draw() {
     drawBlocks();
     drawGoal();
     drawEnemies();
-  } else if (gameState === 'level2') {
-    drawGround(l2Platforms);
-    drawHazards(l2Hazards);
-    drawSigns();
-    drawBlocks();
-    drawL2Goal();
-    drawEnemies();
-  } else if (gameState === 'boss') {
-    drawBossScene();
+    drawEnemyShots();
   } else if (gameState === 'villain') {
     drawVillainScene();
   }
@@ -2744,6 +2894,7 @@ function draw() {
   ctx.restore();
   drawHUD();
   if (popup) drawPopup();
+  drawLevelBanner();
 }
 
 function loop() {
@@ -2752,12 +2903,18 @@ function loop() {
   tapConfirm = false;
 
   // each scene has its own theme; playMusic ignores repeat calls
-  playMusic(gameState);
+  // levels rotate through the action themes so the mood darkens as you climb
+  playMusic(gameState === 'playing'
+    ? (level >= 7 ? 'boss' : level >= 4 ? 'level2' : 'playing')
+    : gameState);
 
-  // the "not you?" chip belongs on the menu only
+  // the menu-only chrome: player switch and the install button
+  const onMenu = (gameState === 'menu' || gameState === 'board') && !askingName;
   if (switchBtn) {
-    switchBtn.style.display =
-      (gameState === 'menu' && profile.id && !askingName) ? 'block' : 'none';
+    switchBtn.style.display = (gameState === 'menu' && profile.id && !askingName) ? 'block' : 'none';
+  }
+  if (installBtn && installPrompt) {
+    installBtn.style.display = onMenu ? 'block' : 'none';
   }
 
   if (gameState === 'menu') {
@@ -2776,12 +2933,6 @@ function loop() {
     }
   } else if (gameState === 'playing') {
     updatePlaying();
-    draw();
-  } else if (gameState === 'boss') {
-    updateBoss();
-    draw();
-  } else if (gameState === 'level2') {
-    updateLevel2();
     draw();
   } else if (gameState === 'villain') {
     updateVillain();
@@ -2804,6 +2955,9 @@ function startRun() {
   fullReset();
   levelReached = 1;
   scoreSubmitted = false;
+  levelBanner = 150;
+  runStartedAt = Date.now();
+  runDurationMs = 0;
   gameState = 'playing';
 }
 
@@ -2811,7 +2965,15 @@ function startRun() {
 function recordRun() {
   if (scoreSubmitted) return;
   scoreSubmitted = true;
-  submitScore(score, levelReached);
+  runDurationMs = runStartedAt ? Date.now() - runStartedAt : 0;
+  submitScore(score, levelReached, runDurationMs);
+}
+
+// mm:ss for the HUD and the board
+function fmtTime(ms) {
+  if (!ms || ms < 0) return '--:--';
+  const t = Math.floor(ms / 1000);
+  return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
 }
 
 resetLevel();

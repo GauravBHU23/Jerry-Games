@@ -22,7 +22,7 @@ const PLAYERS_CSV = path.join(MEDIA, 'players.csv');
 const SCORES_CSV = path.join(MEDIA, 'scores.csv');
 
 const PLAYERS_HEADER = 'id,name,created,lastSeen';
-const SCORES_HEADER = 'id,name,score,level,playedAt';
+const SCORES_HEADER = 'id,name,score,level,durationMs,playedAt';
 
 // ---------- CSV helpers ----------
 // Fields are quoted only when needed; quotes inside are doubled, like Excel.
@@ -105,30 +105,54 @@ function touchPlayer(id) {
   return p;
 }
 
-function addScore(id, name, score, level) {
+function addScore(id, name, score, level, durationMs) {
   const row = {
     id,
     name: String(name || 'PLAYER').toUpperCase().slice(0, 12),
     score: Math.max(0, Math.floor(Number(score) || 0)),
     level: Math.max(1, Math.floor(Number(level) || 1)),
+    durationMs: Math.max(0, Math.floor(Number(durationMs) || 0)),
     playedAt: new Date().toISOString(),
   };
-  appendCsv(SCORES_CSV, SCORES_HEADER, [row.id, row.name, row.score, row.level, row.playedAt]);
+  appendCsv(SCORES_CSV, SCORES_HEADER,
+    [row.id, row.name, row.score, row.level, row.durationMs, row.playedAt]);
   return row;
+}
+
+// Ranking order, applied everywhere so the board is never ambiguous:
+//   1. higher score
+//   2. if tied, the faster run (shorter durationMs)
+//   3. if still tied, whoever set it first
+//   4. last resort, player id - guarantees a total order, so two rows can
+//      never share a rank no matter what the data looks like
+function compareRuns(a, b) {
+  if (b.score !== a.score) return b.score - a.score;
+  const ad = a.durationMs || Infinity;
+  const bd = b.durationMs || Infinity;
+  if (ad !== bd) return ad - bd;
+  const at = new Date(a.playedAt).getTime() || 0;
+  const bt = new Date(b.playedAt).getTime() || 0;
+  if (at !== bt) return at - bt;
+  return String(a.id).localeCompare(String(b.id));
 }
 
 // Best run per player, ranked. This is what the leaderboard shows.
 function buildLeaderboard() {
   const best = new Map();
   for (const s of getScores()) {
-    const score = Number(s.score) || 0;
+    const run = {
+      id: s.id,
+      name: s.name,
+      score: Number(s.score) || 0,
+      level: Number(s.level) || 1,
+      durationMs: Number(s.durationMs) || 0,
+      playedAt: s.playedAt,
+    };
     const cur = best.get(s.id);
-    if (!cur || score > cur.score) {
-      best.set(s.id, { id: s.id, name: s.name, score, level: Number(s.level) || 1, playedAt: s.playedAt });
-    }
+    // a player's own best run is picked with the same tie-break rules
+    if (!cur || compareRuns(run, cur) < 0) best.set(s.id, run);
   }
-  const rows = [...best.values()].sort((a, b) =>
-    b.score - a.score || new Date(a.playedAt) - new Date(b.playedAt));
+  const rows = [...best.values()].sort(compareRuns);
   rows.forEach((r, i) => { r.rank = i + 1; });
   return rows;
 }
@@ -138,7 +162,8 @@ function playerProfile(id) {
   if (!player) return null;
   const mine = getScores()
     .filter(s => s.id === id)
-    .map(s => ({ score: Number(s.score) || 0, level: Number(s.level) || 1, playedAt: s.playedAt }))
+    .map(s => ({ score: Number(s.score) || 0, level: Number(s.level) || 1,
+                 durationMs: Number(s.durationMs) || 0, playedAt: s.playedAt }))
     .sort((a, b) => new Date(b.playedAt) - new Date(a.playedAt));
 
   const board = buildLeaderboard();
@@ -152,6 +177,8 @@ function playerProfile(id) {
     gamesPlayed: mine.length,
     bestScore: mine.reduce((m, r) => Math.max(m, r.score), 0),
     bestLevel: mine.reduce((m, r) => Math.max(m, r.level), 1),
+    // the time of the run that actually earned their board place
+    bestTimeMs: entry ? entry.durationMs : 0,
     rank: entry ? entry.rank : null,
     totalPlayers: board.length,
     history: mine.slice(0, 20),
@@ -189,6 +216,8 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif',
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav',
@@ -233,7 +262,7 @@ const server = http.createServer(async (req, res) => {
       if (!body.id) return sendJson(res, 400, { error: 'id required' });
       const player = getPlayers().find(p => p.id === body.id);
       if (!player) return sendJson(res, 404, { error: 'player not found' });
-      addScore(player.id, player.name, body.score, body.level);
+      addScore(player.id, player.name, body.score, body.level, body.durationMs);
       touchPlayer(player.id);
       return sendJson(res, 201, playerProfile(player.id));
     }
@@ -243,6 +272,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- static files ---
+    // The CSVs live under media/ next to the icons; serve the icons but never
+    // hand out the raw player data - that is what the API is for.
+    if (/\.csv$/i.test(pathname)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      return res.end('Forbidden');
+    }
+
     let rel = pathname === '/' ? '/index.html' : pathname;
     const filePath = path.join(ROOT, rel);
     // never serve anything outside the project folder

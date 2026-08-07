@@ -1,0 +1,46 @@
+{
+  "name": "Jerry the Water Saviour",
+  "short_name": "Jerry",
+  "description": "An educational platformer about water pollution and treatment. 8 levels, a greedy tycoon and a shared leaderboard.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "orientation": "landscape",
+  "background_color": "#001830",
+  "theme_color": "#001830",
+  "categories": ["games", "education"],
+  "lang": "en",
+  "icons": [
+    {
+      "src": "media/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "media/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "media/icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Play now",
+      "short_name": "Play",
+      "url": "./?play=1"
+    },
+    {
+      "name": "Leaderboard",
+      "short_name": "Scores",
+      "url": "./?board=1"
+    }
+  ]
+}
