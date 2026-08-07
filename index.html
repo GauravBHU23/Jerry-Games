@@ -2891,34 +2891,66 @@ function drawHUD() {
   ctx.strokeStyle = '#4af';
   ctx.lineWidth = 1;
   ctx.strokeRect(0, 0, W, 36);
+
+  // Laid out left to right in fixed slots so nothing can overlap:
+  //   15  name | 100 score | 250 lives | 430 power | 590 timer | right: level
   ctx.fillStyle = '#4af';
   ctx.font = 'bold 14px monospace';
   ctx.fillText('◆ JERRY', 15, 23);
+
   ctx.fillStyle = '#fff';
-  ctx.fillText('SCORE ' + score, 110, 23);
-  ctx.fillText('LIVES', 265, 23);
-  for (let i = 0; i < Math.min(lives, 6); i++) {
-    drawMiniDroplet(325 + i * 20, 15);
+  ctx.fillText('SCORE ' + score, 100, 23);
+
+  ctx.fillText('LIVES', 250, 23);
+  const maxPips = 5;
+  for (let i = 0; i < Math.min(lives, maxPips); i++) {
+    drawMiniDroplet(316 + i * 19, 15);
   }
-  if (lives > 6) {
+  if (lives > maxPips) {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 12px monospace';
-    ctx.fillText('x' + lives, 325 + 6 * 20, 23);
+    ctx.fillText('+' + (lives - maxPips), 316 + maxPips * 19, 23);
   }
 
   // powerup stage: no bomb until Jerry has hit two power blocks
-  ctx.font = 'bold 14px monospace';
+  ctx.font = 'bold 13px monospace';
   if (jerry.stage < 2) {
     ctx.fillStyle = '#789';
-    ctx.fillText(jerry.stage === 0 ? 'HIT ? BLOCKS' : 'BIG! ONE MORE ?', 470, 23);
+    ctx.fillText(jerry.stage === 0 ? 'HIT ? BLOCKS' : 'BIG! ONE MORE ?', 448, 23);
   } else if (jerry.hasBomb) {
     ctx.fillStyle = hasPower('overdrive') ? '#f9a'
       : hasPower('rapid') ? '#ff8' : '#4af';
-    ctx.fillText('[X] BOMB', 470, 23);
+    ctx.fillText('[X] BOMB', 448, 23);
   } else {
     ctx.fillStyle = '#567';
-    ctx.fillText('[X] ...', 470, 23);
+    ctx.fillText('[X] ...', 448, 23);
   }
+
+  // run timer - this is what settles a tied score
+  if (runStartedAt) {
+    const ms = scoreSubmitted ? runDurationMs : Date.now() - runStartedAt;
+    ctx.fillStyle = '#9fd';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(fmtTime(ms), 590, 23);
+  }
+
+  // level number and name, hard right, clear of the timer
+  ctx.textAlign = 'right';
+  if (gameState === 'villain') {
+    ctx.fillStyle = '#f88';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText(level >= FINAL_LEVEL ? 'FINAL BOSS' : 'BOSS ' + level + '/' + FINAL_LEVEL,
+                 W - 15, 23);
+  } else {
+    const d = levelData || levelDef(level);
+    ctx.fillStyle = '#8bc';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText('LEVEL ' + level + '/' + FINAL_LEVEL, W - 15, 15);
+    ctx.fillStyle = '#7a93aa';
+    ctx.font = '9px monospace';
+    ctx.fillText(d.name, W - 15, 28);
+  }
+  ctx.textAlign = 'left';
 
   // combo meter - the bar drains, so you can see how long you have left
   if (combo > 1) {
@@ -2937,40 +2969,15 @@ function drawHUD() {
     ctx.fillRect(cx, 62, 108 * (comboTimer / 150), 3);
   }
 
-  // run timer - this is what settles a tied score
-  if (runStartedAt) {
-    const ms = scoreSubmitted ? runDurationMs : Date.now() - runStartedAt;
-    ctx.fillStyle = '#9fd';
-    ctx.font = 'bold 13px monospace';
-    ctx.fillText('⏱ ' + fmtTime(ms), 600, 23);
-  }
-
-  // level number and name, top-right
-  ctx.font = 'bold 12px monospace';
-  ctx.textAlign = 'right';
-  if (gameState === 'villain') {
-    ctx.fillStyle = '#f88';
-    ctx.fillText(level >= FINAL_LEVEL ? 'FINAL BOSS' : 'BOSS ' + level + '/' + FINAL_LEVEL,
-                 W - 118, 16);
-  } else {
-    const d = levelData || levelDef(level);
-    ctx.fillStyle = '#8bc';
-    ctx.fillText('LEVEL ' + level + '/' + FINAL_LEVEL, W - 118, 16);
-    ctx.fillStyle = '#567';
-    ctx.font = '10px monospace';
-    ctx.fillText(d.name, W - 118, 29);
-  }
-  ctx.textAlign = 'left';
-
   // second row: unlocked powers, and the boss health when fighting
   if (gameState === 'villain' && villain) {
+    const bd = villain.def || bossDef(level);
     ctx.fillStyle = '#f66';
     ctx.font = 'bold 14px monospace';
-    const bd = villain.def || bossDef(level);
     ctx.fillText(bd.name + '  ' + villain.hp + '/' + villain.maxHp, 15, 55);
     ctx.fillStyle = '#a67';
     ctx.font = '10px monospace';
-    ctx.fillText(bd.title, 15 + ctx.measureText('').width, 68);
+    ctx.fillText(bd.title, 15, 68);
   } else {
     drawPowerStrip(15, 46);
   }
@@ -3327,41 +3334,48 @@ function drawMenu() {
 
   // mission panel
   ctx.fillStyle = 'rgba(0,20,40,0.7)';
-  ctx.fillRect(120, 265, W - 240, 155);
+  ctx.fillRect(120, 258, W - 240, 148);
   ctx.strokeStyle = '#4af';
   ctx.lineWidth = 2;
-  ctx.strokeRect(120, 265, W - 240, 155);
+  ctx.strokeRect(120, 258, W - 240, 148);
 
   ctx.fillStyle = '#4af';
   ctx.font = 'bold 16px monospace';
-  ctx.fillText('◆ MISSION ◆', W/2, 290);
+  ctx.fillText('◆ MISSION ◆', W/2, 282);
   ctx.fillStyle = '#fff';
   ctx.font = '13px monospace';
-  ctx.fillText('Waste is choking our waters. Jump on trash goons,', W/2, 315);
-  ctx.fillText('avoid sewage, and hit ? blocks from below:', W/2, 333);
-  ctx.fillText('1st makes Jerry BIG, 2nd unlocks WATER BOMBS!', W/2, 351);
+  ctx.fillText('Waste is choking our waters. Jump on trash goons,', W/2, 306);
+  ctx.fillText('avoid sewage, and hit ? blocks from below:', W/2, 324);
+  ctx.fillText('1st makes Jerry BIG, 2nd unlocks WATER BOMBS!', W/2, 342);
   ctx.fillStyle = '#ff8';
-  ctx.fillText('FILTER · CHLORINE · UV LIGHT', W/2, 375);
-  ctx.fillStyle = '#fff';
+  ctx.fillText('FILTER · CHLORINE · UV LIGHT', W/2, 366);
   ctx.fillStyle = '#f88';
-  ctx.fillText(FINAL_LEVEL + ' LEVELS - each ending with its own polluter boss!', W/2, 400);
+  ctx.fillText(FINAL_LEVEL + ' LEVELS - each ending with its own polluter boss!', W/2, 390);
 
-  // greet a player we already know, with their record so far
+  // Returning player gets their own card, clearly separated from the mission
+  // panel rather than crowding up against it.
   if (profile.id && profile.name) {
+    const cardY = 418, cardH = 42;
+    ctx.fillStyle = 'rgba(0,10,26,0.55)';
+    ctx.fillRect(170, cardY, W - 340, cardH);
+    ctx.strokeStyle = 'rgba(255,217,74,0.55)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(170, cardY, W - 340, cardH);
+
     ctx.fillStyle = '#ffd94a';
-    ctx.font = 'bold 15px monospace';
-    ctx.fillText('WELCOME BACK, ' + profile.name + '!', W/2, 428);
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText('WELCOME BACK, ' + profile.name + '!', W/2, cardY + 18);
     ctx.fillStyle = '#cfe9ff';
-    ctx.font = '12px monospace';
+    ctx.font = '11px monospace';
     const bits = ['Best ' + profile.bestScore, profile.gamesPlayed + ' games'];
     if (profile.rank) bits.push('Rank #' + profile.rank + '/' + profile.totalPlayers);
-    ctx.fillText(bits.join('   ·   '), W/2, 446);
+    ctx.fillText(bits.join('   ·   '), W/2, cardY + 34);
   }
 
   ctx.fillStyle = '#0f0';
-  ctx.font = 'bold 18px monospace';
+  ctx.font = 'bold 17px monospace';
   if (Math.floor(Date.now() / 500) % 2) {
-    ctx.fillText(isTouch ? '▶ TAP HERE TO START ◀' : '▶ PRESS ENTER TO START ◀', W/2, 474);
+    ctx.fillText(isTouch ? '▶ TAP HERE TO START ◀' : '▶ PRESS ENTER TO START ◀', W/2, 482);
   }
   ctx.textAlign = 'left';
 }
