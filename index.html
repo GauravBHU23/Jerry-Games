@@ -865,42 +865,42 @@ const LEVEL_END = 3200;
 //  kinds    which enemy types can appear
 //  power    what the second power block unlocks at this level
 const LEVELS = [
-  { n: 1, name: 'THE RIVERBANK',   len: 3000, gaps: 3, gapW:  90, enemies: 4,  speed: 1.00,
+  { n: 1, name: 'THE RIVERBANK',   len: 3000, gaps: 3, gapW:  90, enemies: 5,  speed: 1.05,
     kinds: ['trash'],                              power: 'bomb',
     sky: ['#6bd6ff', '#c9f2ff'], ground: 'grass',
     intro: 'Trash is choking the river. Hit ? blocks from below to grow, then again for WATER BOMBS!' },
 
-  { n: 2, name: 'THE OLD CANAL',   len: 3200, gaps: 4, gapW: 100, enemies: 5,  speed: 1.08,
+  { n: 2, name: 'THE OLD CANAL',   len: 3200, gaps: 4, gapW: 100, enemies: 7,  speed: 1.16,
     kinds: ['trash', 'drum'],                      power: 'rapid',
     sky: ['#7fc9e8', '#d8ecc9'], ground: 'grass',
     intro: 'Rusting drums leak chemicals here. RAPID BOMBS let you throw much faster!' },
 
-  { n: 3, name: 'THE DEAD MARSH',  len: 3400, gaps: 5, gapW: 110, enemies: 6,  speed: 1.16,
+  { n: 3, name: 'THE DEAD MARSH',  len: 3400, gaps: 5, gapW: 110, enemies: 8,  speed: 1.28,
     kinds: ['trash', 'barrel'],                    power: 'triple',
     sky: ['#8aa89a', '#cfc9a0'], ground: 'dead',
     intro: 'Barrels roll fast down the marsh. TRIPLE SHOT throws three bombs in a spread!' },
 
-  { n: 4, name: 'DRONE PATROL',    len: 3600, gaps: 5, gapW: 120, enemies: 7,  speed: 1.24,
+  { n: 4, name: 'DRONE PATROL',    len: 3600, gaps: 5, gapW: 120, enemies: 10, speed: 1.40,
     kinds: ['barrel', 'drone'],                    power: 'doublejump',
     sky: ['#7a86a8', '#b9a48c'], ground: 'dead',
     intro: 'His drones guard the sky - only bombs bring them down. DOUBLE JUMP unlocked!' },
 
-  { n: 5, name: 'THE PIPE WORKS',  len: 3800, gaps: 6, gapW: 125, enemies: 8,  speed: 1.32,
+  { n: 5, name: 'THE PIPE WORKS',  len: 3800, gaps: 6, gapW: 125, enemies: 12, speed: 1.52,
     kinds: ['drum', 'drone', 'barrel'],            power: 'shield',
     sky: ['#8a7a90', '#c9a08c'], ground: 'rust',
     intro: 'Pipes dump waste straight into the water. A SHIELD now absorbs one hit!' },
 
-  { n: 6, name: 'TOXIC OUTFALL',   len: 4000, gaps: 7, gapW: 130, enemies: 9,  speed: 1.40,
+  { n: 6, name: 'TOXIC OUTFALL',   len: 4000, gaps: 7, gapW: 130, enemies: 14, speed: 1.64,
     kinds: ['barrel', 'drone', 'spitter'],         power: 'pierce',
     sky: ['#7a6a8a', '#b98c7a'], ground: 'rust',
     intro: 'SPITTERS shoot sludge from a distance. PIERCING BOMBS pass through enemies!' },
 
-  { n: 7, name: 'THE SMOG BELT',   len: 4200, gaps: 7, gapW: 135, enemies: 10, speed: 1.48,
+  { n: 7, name: 'THE SMOG BELT',   len: 4200, gaps: 7, gapW: 135, enemies: 16, speed: 1.76,
     kinds: ['drone', 'spitter', 'chaser'],         power: 'blast',
     sky: ['#6a5a7a', '#a87a6a'], ground: 'ash',
     intro: 'CHASERS hunt you down. BLAST RADIUS makes every bomb explode wider!' },
 
-  { n: 8, name: 'THE TYCOON TOWER',len: 4400, gaps: 8, gapW: 140, enemies: 11, speed: 1.56,
+  { n: 8, name: 'THE TYCOON TOWER',len: 4400, gaps: 8, gapW: 140, enemies: 18, speed: 1.90,
     kinds: ['spitter', 'chaser', 'drone', 'barrel'], power: 'overdrive',
     sky: ['#4a3a60', '#8a5a5a'], ground: 'ash',
     intro: 'His tower is just ahead. OVERDRIVE: maximum fire rate. Finish this!' },
@@ -981,6 +981,15 @@ let gameState = 'menu';
 let level = 1;             // which level is being played
 let levelData = null;      // the generated map for the current level
 let levelBanner = 0;       // frames left showing the "LEVEL n" title card
+// Combo: chain kills without touching the ground for a rising score multiplier.
+// This is the "get good and get rewarded" loop that makes the harder levels
+// worth pushing through instead of just being punishing.
+let combo = 0;
+let comboTimer = 0;
+let comboBest = 0;
+let floatText = [];        // little "+250 x3" numbers that rise and fade
+let checkpoints = [];      // flags through the level
+let checkpointX = 60;      // where a death sends you back to
 let powerBanner = null;    // {text, timer} shown when a new power unlocks
 let score = 0;
 let lives = 3;
@@ -1197,6 +1206,15 @@ function buildLevel(n) {
   signs.forEach(s => s.shown = false);
 
   goal = { x: end - 150, y: GROUND_Y - 130, w: 40, h: 130 };
+
+  // three checkpoints on solid ground, so a death in a long level does not
+  // mean replaying the whole thing
+  checkpoints = [];
+  for (let i = 1; i <= 3; i++) {
+    checkpoints.push({ x: solidXNear(Math.round((end * i) / 4)), taken: false });
+  }
+  checkpointX = 60;
+
   levelData = { ...d, end };
   return levelData;
 }
@@ -1254,6 +1272,36 @@ function eduText(type) {
 
 function showPopup(text) { popup = { text, timer: 200 }; }
 
+// ---- combo scoring ----
+// Every kill inside the combo window raises the multiplier. Getting hit or
+// letting the timer run out drops it back to zero.
+function addKillScore(base, x, y) {
+  combo++;
+  comboTimer = 150;                       // ~2.5s to land the next one
+  comboBest = Math.max(comboBest, combo);
+  const mult = Math.min(8, combo);        // caps so it stays sane
+  const gained = base * mult;
+  score += gained;
+  floatText.push({
+    x, y, vy: -1.1, life: 60,
+    text: '+' + gained + (mult > 1 ? '  x' + mult : ''),
+    color: mult >= 5 ? '#ff8' : mult >= 3 ? '#8f8' : '#fff',
+  });
+  if (mult > 1) sfx('power');
+  return gained;
+}
+
+function breakCombo() {
+  combo = 0;
+  comboTimer = 0;
+}
+
+function updateFloatText() {
+  for (const f of floatText) { f.y += f.vy; f.life--; }
+  floatText = floatText.filter(f => f.life > 0);
+  if (comboTimer > 0 && --comboTimer === 0) combo = 0;
+}
+
 function spawnParticles(x, y, color, count) {
   for (let i = 0; i < count; i++) {
     particles.push({
@@ -1267,11 +1315,12 @@ function spawnParticles(x, y, color, count) {
 
 function damagePlayer() {
   if (jerry.invuln > 0) return;
+  breakCombo();          // getting hit always costs your streak
 
   // SHIELD soaks the hit and then recharges over a few seconds
   if (jerry.shield) {
     jerry.shield = false;
-    jerry.shieldCd = 480;
+    jerry.shieldCd = 720;   // 12s - a real safety net, not a free pass
     jerry.invuln = 60;
     sfx('hit');
     spawnParticles(jerry.x + 14, jerry.y + 18, '#6ef', 18);
@@ -1302,14 +1351,36 @@ function respawnPlayer() {
     jerry.y = 280;
     villainShots = [];
   } else {
-    jerry.x = Math.max(60, jerry.x - 200);
+    // Send Jerry back to the last checkpoint he touched rather than a blind
+    // 200px back, which could drop him straight into the pit that killed him.
+    jerry.x = checkpointX;
     jerry.y = 200;
     // clear sludge near the respawn so you are not hit instantly
-    villainShots = villainShots.filter(s => Math.abs(s.x - jerry.x) > 200);
+    villainShots = villainShots.filter(s => Math.abs(s.x - jerry.x) > 220);
+    // give the nearby enemies a moment of breathing room
+    for (const e of enemies) {
+      if (e.alive && Math.abs(e.x - jerry.x) < 150) e.alive = false;
+    }
   }
   jerry.vx = 0; jerry.vy = 0;
   jerry.jumps = 0;
-  jerry.invuln = 90;
+  jerry.invuln = 120;
+  breakCombo();
+}
+
+// Checkpoints sit on solid ground every so often through a level.
+function updateCheckpoints() {
+  for (const c of checkpoints) {
+    if (c.taken) continue;
+    if (jerry.x + jerry.w > c.x && jerry.x < c.x + 30) {
+      c.taken = true;
+      checkpointX = c.x;
+      sfx('power');
+      spawnParticles(c.x + 12, GROUND_Y - 40, '#4f8', 16);
+      floatText.push({ x: c.x + 12, y: GROUND_Y - 60, vy: -1,
+                       life: 70, text: 'CHECKPOINT', color: '#4f8' });
+    }
+  }
 }
 
 // ============ UPDATE ============
@@ -1416,7 +1487,7 @@ function updatePlaying() {
         e.alive = false;
         jerry.vy = JUMP_POWER * 0.65;
         jerry.jumps = Math.min(jerry.jumps, 1);
-        score += 100 + level * 10;
+        addKillScore(100 + level * 10, e.x + 12, e.y);
         sfx('hit');
         spawnParticles(e.x + 15, e.y + 15, '#8b6f47', 10);
       } else {
@@ -1450,6 +1521,8 @@ function updatePlaying() {
 
   if (jerry.y > H + 50) damagePlayer();
 
+  updateCheckpoints();
+
   for (const s of signs) {
     if (s.shown) continue;
     if (Math.abs((jerry.x + jerry.w / 2) - (s.x + 20)) < 40) {
@@ -1467,7 +1540,7 @@ function updatePlaying() {
       if (!e.alive || b.dead) continue;
       if (rectHit({ x: b.x - b.r, y: b.y - b.r, w: b.r * 2, h: b.r * 2 }, e)) {
         e.alive = false;
-        score += 100 + level * 10;
+        addKillScore(100 + level * 10, e.x + 12, e.y);
         sfx('hit');
         spawnParticles(e.x + 15, e.y + 15, '#4af', 15);
         // piercing bombs carry on through a couple of enemies
@@ -1480,13 +1553,14 @@ function updatePlaying() {
 
   for (const p of particles) { p.vy += 0.25; p.x += p.vx; p.y += p.vy; p.life--; }
   particles = particles.filter(p => p.life > 0);
+  updateFloatText();
 
   camera.x = Math.max(0, Math.min(d.end - W, jerry.x - 300));
 
   // ---- level complete ----
   if (jerry.x + jerry.w > goal.x + 10) {
-    if (level >= FINAL_LEVEL) startVillain();
-    else nextLevel();
+    // every level ends with its own boss; nextLevel() runs once it is beaten
+    startVillain();
   }
 
   if (jerry.invuln > 0) jerry.invuln--;
@@ -1495,16 +1569,30 @@ function updatePlaying() {
 
 // Moves on to the next stage, keeping powers and score.
 function nextLevel() {
+  // clear bonus rewards keeping lives and chaining kills, so playing well
+  // pays off instead of just surviving
+  const lifeBonus = lives * 150;
+  const comboBonus = comboBest * 100;
+  score += 500 + lifeBonus + comboBonus;
+  powerBanner = {
+    text: 'LEVEL CLEAR!  +' + (500 + lifeBonus + comboBonus),
+    timer: 170,
+  };
+  comboBest = 0;
+  breakCombo();
+
   level++;
   levelReached = Math.max(levelReached, level);
-  score += 500;
   buildLevel(level);
+  gameState = 'playing';        // back to the platforming after a boss
+  villain = null;
   jerry.x = 60; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
   jerry.invuln = 90;
   jerry.jumps = 0;
   camera.x = 0;
   bombs = [];
   villainShots = [];
+  bossActiveEnemies = [];
   particles = [];
   levelBanner = 150;
   sfx('power');
@@ -1635,10 +1723,12 @@ function updateVillain() {
 
   // ---- villain AI ----
   const v = villain;
+  const d = v.def || bossDef(level);
   v.phase = v.hp <= v.maxHp / 3 ? 3 : (v.hp <= v.maxHp * 2 / 3 ? 2 : 1);
 
-  // pace back and forth, turning at the arena edges
-  v.x += v.vx;
+  // pace back and forth, turning at the arena edges; rage makes him sprint
+  const speedMul = v.rage > 0 ? 1.7 : 1;
+  v.x += v.vx * speedMul;
   if (v.x < 40) { v.x = 40; v.vx = Math.abs(v.vx); }
   if (v.x + v.w > W - 40) { v.x = W - 40 - v.w; v.vx = -Math.abs(v.vx); }
   v.facing = Math.sign(v.vx) || -1;
@@ -1646,59 +1736,174 @@ function updateVillain() {
   // gravity for his jumps
   v.vy += GRAVITY;
   v.y += v.vy;
-  if (v.y + v.h >= GROUND_Y) { v.y = GROUND_Y - v.h; v.vy = 0; v.onGround = true; }
-
-  if (v.hurt > 0) v.hurt--;
-
-  // attacks get faster in later phases
-  v.attackTimer--;
-  if (v.attackTimer <= 0) {
-    const gap = [110, 80, 55][v.phase - 1];
-    v.attackTimer = gap + Math.floor(Math.random() * 30);
-
-    const roll = Math.random();
-    if (roll < 0.45) {
-      // hurl a money bag on a lobbing arc towards Jerry
-      const dir = Math.sign((jerry.x + jerry.w/2) - (v.x + v.w/2)) || -1;
-      villainShots.push({
-        x: v.x + v.w/2, y: v.y + 20,
-        vx: dir * (3.2 + v.phase * 0.5), vy: -5,
-        r: 12, kind: 'money', spin: 0
-      });
-    } else if (roll < 0.8) {
-      // splash of toxic waste: a spread of falling blobs
-      const n = 2 + v.phase;
-      for (let i = 0; i < n; i++) {
+  if (v.y + v.h >= GROUND_Y) {
+    if (!v.onGround && v.slamPending) {
+      // landing from a slam sends a shockwave along the floor
+      v.slamPending = false;
+      v.slam = 26;
+      screenShake = 14;
+      sfx('boom');
+      for (const dir of [-1, 1]) {
         villainShots.push({
-          x: v.x + v.w/2, y: v.y + 10,
-          vx: (i - (n - 1) / 2) * 1.9,
-          vy: -6.5,
-          r: 9, kind: 'toxic', spin: 0
+          x: v.x + v.w / 2, y: GROUND_Y - 10,
+          vx: dir * 5.2, vy: 0, r: 11, kind: 'wave', spin: 0, ground: true,
         });
       }
-    } else {
-      // leap towards Jerry
-      if (v.onGround) {
-        v.vy = -11;
-        v.onGround = false;
-        v.vx = (Math.sign((jerry.x + jerry.w/2) - (v.x + v.w/2)) || -1) * (2.2 + v.phase * 0.4);
+    }
+    v.y = GROUND_Y - v.h; v.vy = 0; v.onGround = true;
+  }
+
+  if (v.hurt > 0) v.hurt--;
+  if (v.slam > 0) v.slam--;
+  if (v.rage > 0) v.rage--;
+
+  // summon helpers on their own timer
+  if (d.minions && d.minionGap) {
+    if (--v.minionTimer <= 0) {
+      v.minionTimer = Math.max(90, d.minionGap - v.phase * 30);
+      if (bossActiveEnemies.length < 3 + v.phase) {
+        const e = makeEnemy(d.minions, v.x + v.w / 2, 30, W - 30, 1 + v.phase * 0.2);
+        e.y = d.minions === 'drone' ? 200 : GROUND_Y - e.h;
+        e.baseY = e.y;
+        e.minX = 30; e.maxX = W - 30;
+        e.fromBoss = true;
+        bossActiveEnemies.push(e);
+        spawnParticles(v.x + v.w / 2, v.y + 20, '#8a8', 8);
       }
+    }
+  }
+
+  // ---- attacks ----
+  v.attackTimer--;
+  if (v.attackTimer <= 0) {
+    // later phases and rage shorten the gap between attacks
+    const base = d.gap * [1, 0.78, 0.58][v.phase - 1];
+    v.attackTimer = Math.max(24, Math.round(base * (v.rage > 0 ? 0.5 : 1))) +
+                    Math.floor(Math.random() * 24);
+
+    const moves = d.moves;
+    const pick = moves[Math.floor(Math.random() * moves.length)];
+    const dirTo = Math.sign((jerry.x + jerry.w / 2) - (v.x + v.w / 2)) || -1;
+
+    if (pick === 'lob') {
+      // hurl a money bag on an arc towards Jerry
+      villainShots.push({
+        x: v.x + v.w / 2, y: v.y + 20,
+        vx: dirTo * (3.2 + v.phase * 0.5 + level * 0.12), vy: -5,
+        r: 12, kind: 'money', spin: 0,
+      });
+
+    } else if (pick === 'spray') {
+      // a fan of toxic blobs
+      const n = 2 + v.phase + Math.floor(level / 4);
+      for (let i = 0; i < n; i++) {
+        villainShots.push({
+          x: v.x + v.w / 2, y: v.y + 10,
+          vx: (i - (n - 1) / 2) * 1.9,
+          vy: -6.5,
+          r: 9, kind: 'toxic', spin: 0,
+        });
+      }
+
+    } else if (pick === 'slam') {
+      // leap high, then shockwave on landing
+      if (v.onGround) {
+        v.vy = -13;
+        v.onGround = false;
+        v.slamPending = true;
+        v.vx = dirTo * (2.2 + v.phase * 0.4);
+      }
+
+    } else if (pick === 'summon') {
+      v.minionTimer = 0;      // trigger a helper immediately
+
+    } else if (pick === 'rage') {
+      // final boss only: brief frenzy, everything speeds up
+      v.rage = 150;
+      screenShake = 10;
+      sfx('boom');
+      spawnParticles(v.x + v.w / 2, v.y + v.h / 2, '#f44', 26);
     }
   }
 
   // body contact hurts
   if (jerry.invuln <= 0 && rectHit(jerry, v)) damagePlayer();
 
+  // ---- boss minions ----
+  for (const e of bossActiveEnemies) {
+    if (!e.alive) continue;
+    if (e.type === 'drone') {
+      e.x += e.vx;
+      if (e.x < e.minX || e.x + e.w > e.maxX) e.vx *= -1;
+      e.phase += 0.04;
+      e.y = e.baseY + Math.sin(e.phase) * 26;
+    } else if (e.type === 'chaser') {
+      const dir = Math.sign((jerry.x + jerry.w / 2) - (e.x + e.w / 2)) || 1;
+      e.x += dir * Math.abs(e.vx);
+      e.vx = dir * Math.abs(e.vx);
+    } else if (e.type === 'spitter') {
+      if (--e.fireTimer <= 0) {
+        e.fireTimer = 110;
+        const dx = (jerry.x + jerry.w / 2) - (e.x + e.w / 2);
+        villainShots.push({
+          x: e.x + e.w / 2, y: e.y + 8,
+          vx: Math.sign(dx) * 3.4, vy: -3.4,
+          r: 8, kind: 'toxic', spin: 0,
+        });
+      }
+    } else {
+      e.x += e.vx;
+      if (e.x < e.minX || e.x + e.w > e.maxX) e.vx *= -1;
+    }
+    e.x = Math.max(10, Math.min(W - e.w - 10, e.x));
+
+    if (jerry.invuln <= 0 && rectHit(jerry, e)) {
+      const stompable = e.type !== 'drone' && e.type !== 'drum';
+      if (stompable && jerry.vy > 1 && (jerry.y + jerry.h - jerry.vy) < e.y + 10) {
+        e.alive = false;
+        jerry.vy = JUMP_POWER * 0.65;
+        jerry.jumps = Math.min(jerry.jumps, 1);
+        addKillScore(120, e.x + 12, e.y);
+        sfx('hit');
+        spawnParticles(e.x + 15, e.y + 15, '#8b6f47', 10);
+      } else {
+        damagePlayer();
+      }
+    }
+  }
+  // bombs clear minions too
+  for (const b of bombs) {
+    for (const e of bossActiveEnemies) {
+      if (!e.alive || b.dead) continue;
+      if (rectHit({ x: b.x - b.r, y: b.y - b.r, w: b.r * 2, h: b.r * 2 }, e)) {
+        e.alive = false;
+        addKillScore(120, e.x + 12, e.y);
+        sfx('hit');
+        spawnParticles(e.x + 15, e.y + 15, '#4af', 12);
+        if (!(b.pierce && ++b.hits < 3)) b.dead = true;
+      }
+    }
+  }
+  bossActiveEnemies = bossActiveEnemies.filter(e => e.alive);
+
   // ---- villain projectiles ----
   for (const s of villainShots) {
-    s.vy += GRAVITY * 0.55;
-    s.x += s.vx; s.y += s.vy;
-    s.spin += 0.2;
-    if (s.y - s.r > H || s.x < -60 || s.x > W + 60) s.dead = true;
-    // bounce money bags once off the floor so they stay dangerous
-    if (s.kind === 'money' && s.y + s.r >= GROUND_Y && s.vy > 0) {
-      if (!s.bounced) { s.vy = -5.5; s.bounced = true; }
-      else s.dead = true;
+    if (s.ground) {
+      // shockwave: skims along the floor instead of falling
+      s.x += s.vx;
+      s.y = GROUND_Y - 10;
+      s.spin += 0.3;
+      if (s.x < -60 || s.x > W + 60) s.dead = true;
+    } else {
+      s.vy += GRAVITY * 0.55;
+      s.x += s.vx; s.y += s.vy;
+      s.spin += 0.2;
+      if (s.y - s.r > H || s.x < -60 || s.x > W + 60) s.dead = true;
+      // bounce money bags once off the floor so they stay dangerous
+      if (s.kind === 'money' && s.y + s.r >= GROUND_Y && s.vy > 0) {
+        if (!s.bounced) { s.vy = -5.5; s.bounced = true; }
+        else s.dead = true;
+      }
     }
     if (!s.dead && jerry.invuln <= 0 &&
         rectHit({ x: s.x - s.r, y: s.y - s.r, w: s.r*2, h: s.r*2 }, jerry)) {
@@ -1728,8 +1933,20 @@ function updateVillain() {
       if (v.hp <= 0) {
         spawnParticles(v.x + v.w/2, v.y + v.h/2, '#ff8800', 40);
         spawnParticles(v.x + v.w/2, v.y + v.h/2, '#fff', 30);
-        score += 1500;
-        gameState = 'win';
+        score += 500 + level * 250;
+        screenShake = 20;
+        showPopup('DEFEATED: ' + (v.def || bossDef(level)).name + '. ' +
+                  (v.def || bossDef(level)).fact);
+        bossActiveEnemies = [];
+        villainShots = [];
+        if (level >= FINAL_LEVEL) {
+          gameState = 'win';
+        } else {
+          // beat this polluter, on to the next stretch of river.
+          // nextLevel() resets bombs/enemies, so stop touching them here.
+          nextLevel();
+          return;
+        }
       }
     }
   }
@@ -1737,6 +1954,7 @@ function updateVillain() {
 
   for (const p of particles) { p.vy += 0.25; p.x += p.vx; p.y += p.vy; p.life--; }
   particles = particles.filter(p => p.life > 0);
+  updateFloatText();
 
   if (screenShake > 0) screenShake--;
   if (jerry.invuln > 0) jerry.invuln--;
@@ -2084,94 +2302,139 @@ function drawLevelBanner() {
 // ============ LEVEL 2 / VILLAIN RENDER ============
 function drawVillain() {
   const v = villain;
-  // flash white when he has just been hit
+  const d = v.def || bossDef(level);
   const flash = v.hurt > 0 && Math.floor(Date.now() / 60) % 2 === 0;
+  const raging = v.rage > 0;
+
+  // proportions scale with each boss's size
+  const S = v.h / 96;
+  const bodyTop = v.y + 26 * S;
 
   // shadow
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
   ctx.beginPath();
-  ctx.ellipse(v.x + v.w/2, GROUND_Y + 3, v.w/2, 5, 0, 0, Math.PI*2);
+  ctx.ellipse(v.x + v.w / 2, GROUND_Y + 3, v.w / 2, 5, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  // rage aura on the final boss
+  if (raging) {
+    ctx.strokeStyle = `rgba(255,70,70,${0.35 + Math.sin(Date.now() * 0.02) * 0.25})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(v.x + v.w / 2, v.y + v.h / 2, v.w * 0.85, v.h * 0.62, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
   const skin = flash ? '#fff' : '#e8b98a';
-  const suit = flash ? '#fff' : '#2a2a3a';
+  const suit = flash ? '#fff' : d.color;
+  const trim = flash ? '#fff' : d.accent;
 
   // legs
   ctx.fillStyle = suit;
-  ctx.fillRect(v.x + 10, v.y + 62, 14, 34);
-  ctx.fillRect(v.x + v.w - 24, v.y + 62, 14, 34);
+  ctx.fillRect(v.x + 10 * S, bodyTop + 36 * S, 14 * S, v.h - 62 * S);
+  ctx.fillRect(v.x + v.w - 24 * S, bodyTop + 36 * S, 14 * S, v.h - 62 * S);
   // shoes
   ctx.fillStyle = flash ? '#fff' : '#111';
-  ctx.fillRect(v.x + 6, v.y + v.h - 8, 20, 8);
-  ctx.fillRect(v.x + v.w - 26, v.y + v.h - 8, 20, 8);
+  ctx.fillRect(v.x + 6 * S, v.y + v.h - 8 * S, 20 * S, 8 * S);
+  ctx.fillRect(v.x + v.w - 26 * S, v.y + v.h - 8 * S, 20 * S, 8 * S);
 
-  // fat greedy body in a business suit
+  // body
   ctx.fillStyle = suit;
-  ctx.fillRect(v.x, v.y + 26, v.w, 40);
-  // open jacket + white shirt
-  ctx.fillStyle = flash ? '#fff' : '#f0f0f0';
-  ctx.fillRect(v.x + v.w/2 - 9, v.y + 28, 18, 34);
-  // tie
-  ctx.fillStyle = flash ? '#fff' : '#c0392b';
+  ctx.fillRect(v.x, bodyTop, v.w, 40 * S);
+  // shirt
+  ctx.fillStyle = flash ? '#fff' : '#e8e8e8';
+  ctx.fillRect(v.x + v.w / 2 - 9 * S, bodyTop + 2 * S, 18 * S, 34 * S);
+  // tie in the boss's accent colour
+  ctx.fillStyle = trim;
   ctx.beginPath();
-  ctx.moveTo(v.x + v.w/2, v.y + 28);
-  ctx.lineTo(v.x + v.w/2 - 5, v.y + 36);
-  ctx.lineTo(v.x + v.w/2, v.y + 58);
-  ctx.lineTo(v.x + v.w/2 + 5, v.y + 36);
+  ctx.moveTo(v.x + v.w / 2, bodyTop + 2 * S);
+  ctx.lineTo(v.x + v.w / 2 - 5 * S, bodyTop + 10 * S);
+  ctx.lineTo(v.x + v.w / 2, bodyTop + 32 * S);
+  ctx.lineTo(v.x + v.w / 2 + 5 * S, bodyTop + 10 * S);
   ctx.closePath(); ctx.fill();
 
   // arms
   ctx.fillStyle = suit;
-  ctx.fillRect(v.x - 6, v.y + 30, 10, 26);
-  ctx.fillRect(v.x + v.w - 4, v.y + 30, 10, 26);
+  ctx.fillRect(v.x - 6 * S, bodyTop + 4 * S, 10 * S, 26 * S);
+  ctx.fillRect(v.x + v.w - 4 * S, bodyTop + 4 * S, 10 * S, 26 * S);
   ctx.fillStyle = skin;
-  ctx.fillRect(v.x - 6, v.y + 54, 10, 8);
-  ctx.fillRect(v.x + v.w - 4, v.y + 54, 10, 8);
+  ctx.fillRect(v.x - 6 * S, bodyTop + 28 * S, 10 * S, 8 * S);
+  ctx.fillRect(v.x + v.w - 4 * S, bodyTop + 28 * S, 10 * S, 8 * S);
 
   // head
   ctx.fillStyle = skin;
-  ctx.fillRect(v.x + 12, v.y + 2, v.w - 24, 26);
-  // top hat — classic tycoon
+  ctx.fillRect(v.x + 12 * S, v.y + 2 * S, v.w - 24 * S, 26 * S);
+
+  // hat — every polluter wears a different one
   ctx.fillStyle = flash ? '#fff' : '#15151f';
-  ctx.fillRect(v.x + 6, v.y - 2, v.w - 12, 5);
-  ctx.fillRect(v.x + 13, v.y - 18, v.w - 26, 17);
-  ctx.fillStyle = flash ? '#ccc' : '#c0392b';
-  ctx.fillRect(v.x + 13, v.y - 7, v.w - 26, 4);
+  if (d.n === 4 || d.n === 7) {
+    // peaked cap for the enforcers
+    ctx.fillRect(v.x + 10 * S, v.y - 1 * S, v.w - 20 * S, 7 * S);
+    ctx.fillRect(v.x + 6 * S, v.y + 4 * S, v.w - 12 * S, 4 * S);
+    ctx.fillStyle = trim;
+    ctx.fillRect(v.x + 10 * S, v.y + 1 * S, v.w - 20 * S, 3 * S);
+  } else if (d.n === 5 || d.n === 3) {
+    // hard hat for the site workers
+    ctx.fillStyle = flash ? '#fff' : '#e8a83a';
+    ctx.beginPath();
+    ctx.ellipse(v.x + v.w / 2, v.y + 4 * S, (v.w - 20 * S) / 2, 9 * S, 0, Math.PI, 0);
+    ctx.fill();
+    ctx.fillRect(v.x + 8 * S, v.y + 3 * S, v.w - 16 * S, 4 * S);
+  } else {
+    // top hat for the bosses in suits
+    ctx.fillRect(v.x + 6 * S, v.y - 2 * S, v.w - 12 * S, 5 * S);
+    ctx.fillRect(v.x + 13 * S, v.y - 18 * S, v.w - 26 * S, 17 * S);
+    ctx.fillStyle = trim;
+    ctx.fillRect(v.x + 13 * S, v.y - 7 * S, v.w - 26 * S, 4 * S);
+  }
 
   // angry eyes follow Jerry
-  const look = v.facing > 0 ? 2 : -2;
+  const look = v.facing > 0 ? 2 * S : -2 * S;
   ctx.fillStyle = '#fff';
-  ctx.fillRect(v.x + 17, v.y + 10, 8, 7);
-  ctx.fillRect(v.x + v.w - 25, v.y + 10, 8, 7);
-  ctx.fillStyle = '#000';
-  ctx.fillRect(v.x + 19 + look, v.y + 12, 4, 4);
-  ctx.fillRect(v.x + v.w - 23 + look, v.y + 12, 4, 4);
+  ctx.fillRect(v.x + 17 * S, v.y + 10 * S, 8 * S, 7 * S);
+  ctx.fillRect(v.x + v.w - 25 * S, v.y + 10 * S, 8 * S, 7 * S);
+  ctx.fillStyle = raging ? '#f00' : '#000';
+  ctx.fillRect(v.x + 19 * S + look, v.y + 12 * S, 4 * S, 4 * S);
+  ctx.fillRect(v.x + v.w - 23 * S + look, v.y + 12 * S, 4 * S, 4 * S);
   // furious brows
   ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(v.x + 16, v.y + 7); ctx.lineTo(v.x + 26, v.y + 11);
-  ctx.moveTo(v.x + v.w - 16, v.y + 7); ctx.lineTo(v.x + v.w - 26, v.y + 11);
+  ctx.moveTo(v.x + 16 * S, v.y + 7 * S); ctx.lineTo(v.x + 26 * S, v.y + 11 * S);
+  ctx.moveTo(v.x + v.w - 16 * S, v.y + 7 * S); ctx.lineTo(v.x + v.w - 26 * S, v.y + 11 * S);
   ctx.stroke();
   // grimace
   ctx.beginPath();
-  ctx.moveTo(v.x + 20, v.y + 24); ctx.lineTo(v.x + v.w - 20, v.y + 24);
+  ctx.moveTo(v.x + 20 * S, v.y + 24 * S); ctx.lineTo(v.x + v.w - 20 * S, v.y + 24 * S);
   ctx.stroke();
   // cigar
   ctx.fillStyle = flash ? '#fff' : '#6b3d1a';
-  ctx.fillRect(v.x + v.w - 18, v.y + 21, 12, 4);
+  ctx.fillRect(v.x + v.w - 18 * S, v.y + 21 * S, 12 * S, 4 * S);
   ctx.fillStyle = '#f80';
-  ctx.fillRect(v.x + v.w - 7, v.y + 21, 3, 4);
+  ctx.fillRect(v.x + v.w - 7 * S, v.y + 21 * S, 3 * S, 4 * S);
 
-  // health bar above him
-  const bw = 90, bx = v.x + v.w/2 - bw/2, by = v.y - 32;
+  // name plate and health bar above him
+  const bw = Math.max(96, v.w + 46), bx = v.x + v.w / 2 - bw / 2, by = v.y - 40;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = flash ? '#fff' : trim;
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText(d.name, v.x + v.w / 2, by - 4);
+  ctx.textAlign = 'left';
+
   ctx.fillStyle = 'rgba(0,0,0,0.65)';
   ctx.fillRect(bx - 2, by - 2, bw + 4, 12);
   ctx.fillStyle = '#500';
   ctx.fillRect(bx, by, bw, 8);
-  ctx.fillStyle = v.hp > 4 ? '#3d3' : v.hp > 2 ? '#fd3' : '#f44';
-  ctx.fillRect(bx, by, bw * (v.hp / v.maxHp), 8);
+  const frac = v.hp / v.maxHp;
+  ctx.fillStyle = frac > 0.6 ? '#3d3' : frac > 0.3 ? '#fd3' : '#f44';
+  ctx.fillRect(bx, by, bw * frac, 8);
   ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
   ctx.strokeRect(bx, by, bw, 8);
+  // pip per hit so you can see exactly how many bombs are left
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  for (let i = 1; i < v.maxHp; i++) {
+    const x = bx + (bw * i) / v.maxHp;
+    ctx.beginPath(); ctx.moveTo(x, by); ctx.lineTo(x, by + 8); ctx.stroke();
+  }
 }
 
 function drawVillainShots() {
@@ -2187,6 +2450,21 @@ function drawVillainShots() {
       ctx.font = 'bold 13px monospace';
       ctx.fillText('$', -4, 5);
       ctx.restore();
+    } else if (s.kind === 'wave') {
+      // ground shockwave from a slam
+      ctx.strokeStyle = 'rgba(255,180,80,0.9)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y + 6, s.r + Math.sin(s.spin * 3) * 2, Math.PI, 0);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,120,40,0.5)';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y + 6, s.r * 0.6, Math.PI, 0);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(120,90,40,0.5)';
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(s.x - 6 + i * 6, s.y + 2 - (i % 2) * 4, 3, 3);
+      }
     } else {
       // toxic blob
       ctx.fillStyle = 'rgba(120,200,40,0.9)';
@@ -2196,6 +2474,14 @@ function drawVillainShots() {
       ctx.beginPath(); ctx.arc(s.x - 3, s.y - 3, s.r * 0.35, 0, Math.PI*2); ctx.fill();
     }
   }
+}
+
+// Boss helpers reuse the level enemy art.
+function drawBossMinions() {
+  const saved = enemies;
+  enemies = bossActiveEnemies;
+  drawEnemies();
+  enemies = saved;
 }
 
 function drawVillainScene() {
@@ -2211,16 +2497,46 @@ function drawVillainScene() {
     ctx.fill();
   }
 
-  // money piles he is standing on
+  // what the boss is standing on says what they do
+  const d = (villain && villain.def) || bossDef(level);
   for (let i = 0; i < 3; i++) {
     const bx = 150 + i * 260;
-    ctx.fillStyle = '#2f7a3f';
-    ctx.fillRect(bx, GROUND_Y - 10, 60, 10);
-    ctx.fillStyle = '#3d9b52';
-    ctx.fillRect(bx + 6, GROUND_Y - 16, 48, 8);
-    ctx.fillStyle = '#1d5a2c';
-    ctx.font = 'bold 9px monospace';
-    ctx.fillText('$$$', bx + 20, GROUND_Y - 3);
+    if (d.n === 1) {                       // rubbish sacks
+      ctx.fillStyle = '#2f2f2f';
+      ctx.beginPath();
+      ctx.ellipse(bx + 30, GROUND_Y - 8, 30, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#1c1c1c';
+      ctx.fillRect(bx + 24, GROUND_Y - 20, 12, 8);
+    } else if (d.n === 2 || d.n === 5) {   // stacked drums
+      ctx.fillStyle = '#a83a2a';
+      ctx.fillRect(bx + 8, GROUND_Y - 26, 22, 26);
+      ctx.fillRect(bx + 34, GROUND_Y - 20, 22, 20);
+      ctx.fillStyle = '#5a1a10';
+      ctx.fillRect(bx + 8, GROUND_Y - 20, 22, 3);
+      ctx.fillRect(bx + 34, GROUND_Y - 15, 22, 3);
+    } else if (d.n === 3 || d.n === 6) {   // sludge pools
+      ctx.fillStyle = 'rgba(110,150,40,0.75)';
+      ctx.beginPath();
+      ctx.ellipse(bx + 30, GROUND_Y + 4, 42, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (d.n === 4 || d.n === 7) {   // crates and pipes
+      ctx.fillStyle = '#5a5a66';
+      ctx.fillRect(bx + 10, GROUND_Y - 22, 44, 22);
+      ctx.strokeStyle = '#33333c'; ctx.lineWidth = 2;
+      ctx.strokeRect(bx + 10, GROUND_Y - 22, 44, 22);
+      ctx.beginPath();
+      ctx.moveTo(bx + 10, GROUND_Y - 22); ctx.lineTo(bx + 54, GROUND_Y);
+      ctx.stroke();
+    } else {                                // the tycoon's money
+      ctx.fillStyle = '#2f7a3f';
+      ctx.fillRect(bx, GROUND_Y - 10, 60, 10);
+      ctx.fillStyle = '#3d9b52';
+      ctx.fillRect(bx + 6, GROUND_Y - 16, 48, 8);
+      ctx.fillStyle = '#1d5a2c';
+      ctx.font = 'bold 9px monospace';
+      ctx.fillText('$$$', bx + 20, GROUND_Y - 3);
+    }
   }
 
   // arena platforms
@@ -2236,6 +2552,7 @@ function drawVillainScene() {
     ctx.strokeRect(p.x, p.y, p.w, p.h);
   }
 
+  drawBossMinions();
   drawVillain();
   drawVillainShots();
 }
@@ -2368,6 +2685,47 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
+// Checkpoint flags: grey until reached, then green and waving.
+function drawCheckpoints() {
+  for (const c of checkpoints) {
+    const poleTop = GROUND_Y - 62;
+    ctx.fillStyle = '#8a8a92';
+    ctx.fillRect(c.x + 12, poleTop, 4, 62);
+    ctx.fillStyle = '#6a6a72';
+    ctx.fillRect(c.x + 6, GROUND_Y - 4, 16, 4);
+    const wave = c.taken ? Math.sin(Date.now() * 0.006) * 3 : 0;
+    ctx.fillStyle = c.taken ? '#3ad07a' : '#5a6068';
+    ctx.beginPath();
+    ctx.moveTo(c.x + 16, poleTop + 2);
+    ctx.lineTo(c.x + 40 + wave, poleTop + 10);
+    ctx.lineTo(c.x + 16, poleTop + 20);
+    ctx.closePath();
+    ctx.fill();
+    if (c.taken) {
+      ctx.strokeStyle = 'rgba(58,208,122,0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(c.x + 14, poleTop + 11, 16 + Math.sin(Date.now() * 0.004) * 2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+}
+
+// Score popups that rise from whatever you just destroyed.
+function drawFloatText() {
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 13px monospace';
+  for (const f of floatText) {
+    ctx.globalAlpha = Math.min(1, f.life / 25);
+    ctx.fillStyle = '#000';
+    ctx.fillText(f.text, f.x + 1, f.y + 1);
+    ctx.fillStyle = f.color;
+    ctx.fillText(f.text, f.x, f.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
+}
+
 function drawHUD() {
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.fillRect(0, 0, W, 36);
@@ -2403,6 +2761,23 @@ function drawHUD() {
     ctx.fillText('[X] ...', 470, 23);
   }
 
+  // combo meter - the bar drains, so you can see how long you have left
+  if (combo > 1) {
+    const mult = Math.min(8, combo);
+    const cx = W / 2 - 54;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(cx, 40, 108, 22);
+    ctx.strokeStyle = mult >= 5 ? '#ff8' : '#8f8';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cx, 40, 108, 22);
+    ctx.fillStyle = mult >= 5 ? '#ff8' : '#8f8';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText('COMBO x' + mult, cx + 8, 56);
+    // draining timer bar
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillRect(cx, 62, 108 * (comboTimer / 150), 3);
+  }
+
   // run timer - this is what settles a tied score
   if (runStartedAt) {
     const ms = scoreSubmitted ? runDurationMs : Date.now() - runStartedAt;
@@ -2416,7 +2791,8 @@ function drawHUD() {
   ctx.textAlign = 'right';
   if (gameState === 'villain') {
     ctx.fillStyle = '#f88';
-    ctx.fillText('FINAL BOSS', W - 118, 16);
+    ctx.fillText(level >= FINAL_LEVEL ? 'FINAL BOSS' : 'BOSS ' + level + '/' + FINAL_LEVEL,
+                 W - 118, 16);
   } else {
     const d = levelData || levelDef(level);
     ctx.fillStyle = '#8bc';
@@ -2431,7 +2807,11 @@ function drawHUD() {
   if (gameState === 'villain' && villain) {
     ctx.fillStyle = '#f66';
     ctx.font = 'bold 14px monospace';
-    ctx.fillText('THE GREEDY TYCOON  HP: ' + villain.hp + '/' + villain.maxHp, 15, 55);
+    const bd = villain.def || bossDef(level);
+    ctx.fillText(bd.name + '  ' + villain.hp + '/' + villain.maxHp, 15, 55);
+    ctx.fillStyle = '#a67';
+    ctx.font = '10px monospace';
+    ctx.fillText(bd.title, 15 + ctx.measureText('').width, 68);
   } else {
     drawPowerStrip(15, 46);
   }
@@ -2794,7 +3174,7 @@ function drawMenu() {
   ctx.fillText('FILTER · CHLORINE · UV LIGHT', W/2, 375);
   ctx.fillStyle = '#fff';
   ctx.fillStyle = '#f88';
-  ctx.fillText(FINAL_LEVEL + ' LEVELS + the Greedy Tycoon final boss!', W/2, 400);
+  ctx.fillText(FINAL_LEVEL + ' LEVELS - each ending with its own polluter boss!', W/2, 400);
 
   // greet a player we already know, with their record so far
   if (profile.id && profile.name) {
@@ -2934,6 +3314,8 @@ function fullReset() {
   screenShake = 0;
   levelBanner = 0;
   powerBanner = null;
+  combo = 0; comboTimer = 0; comboBest = 0;
+  floatText = [];
   buildLevel(level);
 }
 
@@ -2950,6 +3332,7 @@ function draw() {
     drawGround();
     drawHazards();
     drawSigns();
+    drawCheckpoints();
     drawBlocks();
     drawGoal();
     drawEnemies();
@@ -2960,6 +3343,7 @@ function draw() {
   drawJerry();
   drawBombs();
   drawParticles();
+  drawFloatText();
   ctx.restore();
   drawHUD();
   if (popup) drawPopup();
@@ -2973,8 +3357,10 @@ function loop() {
 
   // each scene has its own theme; playMusic ignores repeat calls
   // levels rotate through the action themes so the mood darkens as you climb
-  playMusic(gameState === 'playing'
-    ? (level >= 7 ? 'boss' : level >= 4 ? 'level2' : 'playing')
+  // boss fights get the heavy theme; the final one gets the fiercest
+  playMusic(
+    gameState === 'villain' ? (level >= FINAL_LEVEL ? 'villain' : 'boss')
+    : gameState === 'playing' ? (level >= 6 ? 'boss' : level >= 3 ? 'level2' : 'playing')
     : gameState);
 
   // the menu-only chrome: player switch and the install button

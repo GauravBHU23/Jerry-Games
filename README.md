@@ -1,7 +1,7 @@
 # Jerry the Water Saviour
 
 An educational platformer about water pollution and treatment.
-8 levels, a final boss and a shared leaderboard. Installable as an app,
+8 levels, 8 industry bosses and a shared leaderboard. Installable as an app,
 plays on desktop and mobile, and works offline.
 
 ## How to run (local)
@@ -150,21 +150,56 @@ experience.
 
 ## How the game works
 
-Eight levels, then the final boss. Each level is longer, has more and faster
-enemies, wider sewage pits and introduces a new kind of enemy — and each one
-rewards you with a new power that you keep for the rest of the run.
+Eight levels, each ending in a boss fight. Every level is longer, has more and
+faster enemies, wider sewage pits and introduces a new kind of enemy — and each
+one rewards you with a new power that you keep for the rest of the run.
 
-| Level | Name | New enemy | Power unlocked |
-|---|---|---|---|
-| 1 | The Riverbank | trash goons | **WATER BOMB** — press `X` |
-| 2 | The Old Canal | toxic drums | **RAPID FIRE** — 3× faster |
-| 3 | The Dead Marsh | rolling barrels | **TRIPLE SHOT** — 3 bombs at once |
-| 4 | Drone Patrol | flying drones | **DOUBLE JUMP** |
-| 5 | The Pipe Works | — | **SHIELD** — absorbs a hit, recharges |
-| 6 | Toxic Outfall | spitters (shoot sludge) | **PIERCING** — bombs pass through |
-| 7 | The Smog Belt | chasers (hunt you) | **BLAST RADIUS** — bigger hits |
-| 8 | The Tycoon Tower | — | **OVERDRIVE** — maximum fire rate |
-| ★ | The Greedy Tycoon | final boss, 12 HP | — |
+| Level | Name | New enemy | Power unlocked | Boss (HP) |
+|---|---|---|---|---|
+| 1 | The Riverbank | trash goons | **WATER BOMB** — press `X` | The Trash Baron (4) |
+| 2 | The Old Canal | toxic drums | **RAPID FIRE** — 3× faster | Drum Warden (5) |
+| 3 | The Dead Marsh | rolling barrels | **TRIPLE SHOT** — 3 bombs at once | Sludge Barge (6) |
+| 4 | Drone Patrol | flying drones | **DOUBLE JUMP** | Drone Marshal (7) |
+| 5 | The Pipe Works | — | **SHIELD** — absorbs a hit, recharges | Pipe Foreman (8) |
+| 6 | Toxic Outfall | spitters (shoot sludge) | **PIERCING** — bombs pass through | Toxic Baron (9) |
+| 7 | The Smog Belt | chasers (hunt you) | **BLAST RADIUS** — bigger hits | Smog General (10) |
+| 8 | The Tycoon Tower | — | **OVERDRIVE** — maximum fire rate | **The Greedy Tycoon (14)** |
+
+### Combos — the reason to play well
+
+Kills chained within about 2.5 seconds of each other build a **combo
+multiplier**, up to **x8**. A kill worth 100 becomes 800 at the top of a chain,
+so clearing a group cleanly is worth far more than picking enemies off one by
+one.
+
+The chain resets if you get hit or let the timer run out — the meter at the top
+of the screen shows how long you have left.
+
+At the end of each level you get a **clear bonus**: `500 + (lives × 150) +
+(best combo × 100)`. Rushing through with one life and no chains pays about
+950; playing well pays double that.
+
+### Checkpoints
+
+Each level has three checkpoint flags. Touch one and it turns green — dying
+sends you back there instead of to the start, and the enemies right around the
+respawn are cleared so you never reappear into an instant second death.
+
+### The bosses
+
+Every level ends with the polluter responsible for it, and each is harder than
+the last — more health, faster attacks, and new attack types:
+
+| Attack | What it does | From |
+|---|---|---|
+| **Lob** | hurls a money bag that bounces once | boss 1 |
+| **Spray** | fan of toxic blobs | boss 2 |
+| **Slam** | leaps and sends shockwaves along the floor | boss 3 |
+| **Summon** | calls in the level's own enemies as helpers | boss 4 |
+| **Rage** | temporary frenzy — everything speeds up | boss 8 only |
+
+Bosses also touch-damage you, so keep moving. Beating one takes you straight
+into the next level with all your powers intact.
 
 In every level, hitting a `?` power block the first time makes Jerry **big**,
 and the second one arms his **water bombs**. A further power block hands over
