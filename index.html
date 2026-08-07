@@ -3169,11 +3169,13 @@ function drawLeaderboard() {
   });
 
   ctx.textAlign = 'center';
-  ctx.fillStyle = leaderboard.status === 'offline' ? '#f88' : '#5b7';
-  ctx.font = '10px monospace';
-  ctx.fillText(leaderboard.status === 'offline'
-    ? 'this device only - no leaderboard server reachable'
-    : 'synced with media/scores.csv', W / 2, H - 32);
+
+  // only worth saying something when scores are NOT being shared
+  if (leaderboard.status === 'offline') {
+    ctx.fillStyle = '#f88';
+    ctx.font = '10px monospace';
+    ctx.fillText('this device only - no leaderboard server reachable', W / 2, H - 32);
+  }
 
   ctx.fillStyle = '#0f0';
   ctx.font = 'bold 15px monospace';
