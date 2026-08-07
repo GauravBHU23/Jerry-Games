@@ -55,8 +55,17 @@
   #sound:active { transform: scale(0.9); }
   #sound.off { border-color: #667; color: #889; background: rgba(30, 30, 40, 0.75); }
   /* on narrow screens there is no room beside the canvas - move it inside */
+  /* No room beside the canvas: put the button inside it. Touch devices always
+     fill the width, so they always need the inside position - a width-only
+     breakpoint missed big phones like the 932px iPhone Pro Max. */
   @media (max-width: 920px) {
     #sound { right: 8px; top: 44px; width: 38px; height: 38px; font-size: 17px; }
+  }
+  body.touch-mode #sound {
+    right: 8px; top: 44px; width: 38px; height: 38px; font-size: 17px;
+  }
+  @media (orientation: landscape) and (max-height: 500px) {
+    body.touch-mode #sound { top: 8px; width: 34px; height: 34px; font-size: 15px; }
   }
 
   /* ===== name entry ===== */
@@ -184,7 +193,7 @@
   #game {
     display: block;
     width: 100%;
-    height: auto;
+    height: auto;   /* fitCanvas() sets an explicit height */
     border: 3px solid #4af;
     box-shadow: 0 0 40px rgba(74, 175, 255, 0.6);
     /* no image-rendering:pixelated - the canvas now renders at the device's
@@ -254,6 +263,9 @@
     h1 { display: none; }
     .btn { width: 56px; height: 56px; font-size: 20px; }
     .btn.small { width: 50px; height: 50px; font-size: 14px; }
+    /* phone landscape: hand every pixel to the game */
+    body { padding: 0; justify-content: center; }
+    #game { border-width: 2px; }
   }
 </style>
 </head>
@@ -304,6 +316,12 @@ const ctx = canvas.getContext('2d');
 // The game always thinks in this coordinate space. The canvas backing store is
 // resized to the real device resolution in fitCanvas(), which keeps text sharp.
 const W = 800, H = 500;
+// On a wide screen (phone landscape especially) the 800x500 box leaves big
+// empty margins. VIEW_W is how many game units are actually visible; anything
+// wider than W is extra world shown to the left and right. HUD and menus stay
+// laid out in the 800-wide box, centred inside the view.
+let VIEW_W = W;
+let VIEW_X = 0;      // left edge of the 800-wide UI box inside the view
 
 // Input
 const keys = {};
@@ -333,25 +351,37 @@ function fitCanvas() {
   const landscape = window.innerWidth > window.innerHeight;
   // Landscape buttons float over the sides, but still keep a small margin so
   // they never sit on top of the HUD/action area at the bottom of the canvas.
-  const reserved = isTouch ? (landscape ? 30 : 110) : 24;
-  const availW = window.innerWidth - 12;
+  const reserved = isTouch ? (landscape ? 6 : 110) : 24;
+  const availW = window.innerWidth - (isTouch && landscape ? 0 : 12);
   const availH = window.innerHeight - chrome - reserved;
-  const scale = Math.max(0.2, Math.min(availW / W, availH / H));
-  const cssW = Math.floor(W * scale);
-  stage.style.width = cssW + 'px';
 
-  // Render at the real device resolution instead of stretching an 800x500
-  // bitmap, which is what made all the text look soft. The game keeps drawing
-  // in 800x500 coordinates; the transform below does the scaling.
+  // Height decides the scale, then we let the canvas be as wide as the screen
+  // allows. That extra width becomes more visible world instead of black bars,
+  // so phone landscape genuinely fills the screen.
+  let scale = Math.max(0.2, availH / H);
+  // never let the 800-wide UI box itself overflow the screen
+  scale = Math.min(scale, availW / W);
+  const wantW = Math.min(availW, Math.round(W * 2.4 * scale));  // sane upper bound
+  const cssW = Math.floor(Math.min(availW, Math.max(W * scale, wantW)));
+  const cssH = Math.floor(H * scale);
+
+  VIEW_W = Math.round(cssW / scale);       // game units across the canvas
+  VIEW_X = Math.round((VIEW_W - W) / 2);   // centre the 800-wide UI box
+
+  stage.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+
+  // Render at the real device resolution instead of stretching a small bitmap,
+  // which is what made text look soft.
   const dpr = Math.min(3, window.devicePixelRatio || 1);
   const pxW = Math.round(cssW * dpr);
-  const pxH = Math.round(cssW * (H / W) * dpr);
+  const pxH = Math.round(cssH * dpr);
   if (canvas.width !== pxW || canvas.height !== pxH) {
     canvas.width = pxW;
     canvas.height = pxH;
   }
   // one unit of game space -> however many real pixels that is now
-  ctx.setTransform(pxW / W, 0, 0, pxH / H, 0, 0);
+  ctx.setTransform(pxH / H, 0, 0, pxH / H, 0, 0);
   ctx.imageSmoothingEnabled = true;
 }
 window.addEventListener('resize', fitCanvas);
@@ -1681,7 +1711,8 @@ function updatePlaying() {
   particles = particles.filter(p => p.life > 0);
   updateFloatText();
 
-  camera.x = Math.max(0, Math.min(d.end - W, jerry.x - 300));
+  // clamp against the visible width, so a wide view never scrolls past the end
+  camera.x = Math.max(0, Math.min(d.end - VIEW_W, jerry.x - (VIEW_W / 2 - 100)));
 
   // ---- level complete ----
   if (jerry.x + jerry.w > goal.x + 10) {
@@ -2102,7 +2133,7 @@ function drawSky() {
     g.addColorStop(1, sky[1]);
   }
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(0, 0, VIEW_W, H);   // fill the whole view, not just the UI box
 }
 
 function drawClouds() {
@@ -2111,7 +2142,8 @@ function drawClouds() {
     : level >= 3 ? 'rgba(120,110,100,0.55)'
     : 'rgba(255,255,255,0.75)';
   const off = (camera.x * 0.3) % 240;
-  for (let i = -1; i < 6; i++) {
+  const cols = Math.ceil(VIEW_W / 240) + 2;   // cover the full view width
+  for (let i = -1; i < cols; i++) {
     const cx = i * 240 - off + 40;
     const cy = 70 + (i % 2) * 30;
     ctx.beginPath();
@@ -3456,7 +3488,9 @@ function draw() {
   // impact shake during the final fight
   const sx = screenShake > 0 ? (Math.random() - 0.5) * screenShake : 0;
   const sy = screenShake > 0 ? (Math.random() - 0.5) * screenShake : 0;
-  ctx.translate(-camera.x + sx, sy);
+  // On a wide screen the world is drawn shifted right by VIEW_X, so the extra
+  // canvas width shows more level instead of empty margin.
+  ctx.translate(VIEW_X - camera.x + sx, sy);
   if (gameState === 'playing') {
     drawGround();
     drawHazards();
@@ -3474,9 +3508,27 @@ function draw() {
   drawParticles();
   drawFloatText();
   ctx.restore();
+
+  // UI keeps its 800-wide layout, centred in the view
+  ctx.save();
+  ctx.translate(VIEW_X, 0);
   drawHUD();
   if (popup) drawPopup();
   drawLevelBanner();
+  ctx.restore();
+}
+
+// Full-screen menus are laid out in the 800-wide box. On a wider view we paint
+// the side margins first so nothing shows through, then draw them centred.
+function centred(drawFn) {
+  if (VIEW_X > 0) {
+    ctx.fillStyle = '#04182f';
+    ctx.fillRect(0, 0, VIEW_W, H);
+  }
+  ctx.save();
+  ctx.translate(VIEW_X, 0);
+  drawFn();
+  ctx.restore();
 }
 
 function loop() {
@@ -3502,7 +3554,7 @@ function loop() {
   }
 
   if (gameState === 'menu') {
-    drawMenu();
+    centred(drawMenu);
     // the dialog owns input while it is open
     if (!askingName && (keys['enter'] || tapped)) {
       keys['enter'] = false;
@@ -3510,7 +3562,7 @@ function loop() {
       else askName();               // first time here - ask who they are
     }
   } else if (gameState === 'board') {
-    drawLeaderboard();
+    centred(drawLeaderboard);
     if (!askingName && (keys['enter'] || keys['r'] || tapped)) {
       keys['enter'] = false; keys['r'] = false;
       gameState = 'menu';
@@ -3524,11 +3576,11 @@ function loop() {
   } else if (gameState === 'gameover') {
     recordRun();
     draw();
-    drawGameOver();
+    centred(drawGameOver);
     if (keys['r'] || tapped) { keys['r'] = false; gameState = 'board'; }
   } else if (gameState === 'win') {
     recordRun();
-    drawWin();
+    centred(drawWin);
     if (keys['r'] || tapped) { keys['r'] = false; gameState = 'board'; }
   }
   requestAnimationFrame(loop);
