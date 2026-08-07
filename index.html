@@ -287,6 +287,8 @@
     z-index: 10;
   }
   body.touch-mode #touch { display: flex; }
+  /* the thumb controls are dead while the pause menu is up */
+  body.is-paused #touch .btn { opacity: 0.35; pointer-events: none; }
   body.touch-mode #info { display: none; }
   /* keep the play area vertically centred in the space above the buttons */
   body.touch-mode { justify-content: center; padding-bottom: 110px; }
@@ -388,8 +390,12 @@ let VIEW_X = 0;      // left edge of the 800-wide UI box inside the view
 // Input
 const keys = {};
 window.addEventListener('keydown', e => {
-  keys[e.key.toLowerCase()] = true;
-  if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(e.key.toLowerCase())) e.preventDefault();
+  const k = e.key.toLowerCase();
+  if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(k)) e.preventDefault();
+  // While paused the movement keys must not latch, or Jerry bolts the instant
+  // you resume. The pause menu reads its own keys separately.
+  if (paused) return;
+  keys[k] = true;
 });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
@@ -455,6 +461,7 @@ document.querySelectorAll('#touch .btn').forEach(btn => {
   const key = btn.dataset.key;
   const press = e => {
     e.preventDefault();
+    if (paused) return;          // the pause menu owns input while it is open
     keys[key] = true;
     btn.classList.add('active');
   };
@@ -3619,6 +3626,7 @@ function fullReset() {
   combo = 0; comboTimer = 0; comboBest = 0;
   floatText = [];
   paused = false; pausedAt = 0; pauseSel = 0;
+  document.body.classList.remove('is-paused');
   buildLevel(level);
 }
 
@@ -3689,12 +3697,18 @@ function setPaused(on) {
   if (on) {
     pauseSel = 0;
     pausedAt = Date.now();
+    // Drop held keys and touch buttons - otherwise Jerry keeps running the
+    // moment you resume, or a held jump fires straight away.
+    for (const k of Object.keys(keys)) keys[k] = false;
+    document.querySelectorAll('#touch .btn.active')
+      .forEach(b => b.classList.remove('active'));
   } else if (pausedAt) {
     // Don't let paused time count towards the run - it decides score ties.
     runStartedAt += Date.now() - pausedAt;
     pausedAt = 0;
   }
   paused = on;
+  document.body.classList.toggle('is-paused', on);
 }
 
 // "Back" means something different on each screen.
@@ -3764,20 +3778,25 @@ window.addEventListener('keydown', e => {
   }
 });
 
-// Tapping a pause menu row picks it.
+// Tapping a pause menu row picks it. This runs in the capture phase, before
+// the tap-to-start latch, and stops the event so choosing "Quit" cannot also
+// register as a tap on the screen it lands on.
 canvas.addEventListener('pointerdown', e => {
   if (!paused) return;
+  e.preventDefault();
+  e.stopPropagation();
   const r = canvas.getBoundingClientRect();
   // screen pixels -> game units, then undo the centring offset
   const gx = (e.clientX - r.left) / r.width * VIEW_W - VIEW_X;
   const gy = (e.clientY - r.top) / r.height * H;
-  PAUSE_ITEMS.forEach((_, i) => {
+  const hit = PAUSE_ITEMS.findIndex((_, i) => {
     const y = 232 + i * 42;
-    if (gx > W / 2 - 150 && gx < W / 2 + 150 && gy > y - 24 && gy < y + 12) {
-      pauseSel = i;
-      choosePauseItem();
-    }
+    return gx > W / 2 - 150 && gx < W / 2 + 150 && gy > y - 24 && gy < y + 12;
   });
+  if (hit >= 0) {
+    pauseSel = hit;
+    choosePauseItem();
+  }
 }, true);
 
 function drawPauseMenu() {
