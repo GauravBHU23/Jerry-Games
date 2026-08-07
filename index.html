@@ -28,6 +28,30 @@
     line-height: 0;
     max-width: 100%;
   }
+  /* sound toggle, tucked against the top-right of the play area */
+  #sound {
+    position: absolute;
+    top: 8px; right: -52px;
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    background: rgba(20, 45, 75, 0.75);
+    border: 2px solid #4af;
+    color: #cfe9ff;
+    font-size: 19px;
+    line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    z-index: 20;
+    touch-action: manipulation;
+    transition: transform .08s, background .12s, border-color .12s;
+  }
+  #sound:hover { background: rgba(74, 175, 255, 0.35); }
+  #sound:active { transform: scale(0.9); }
+  #sound.off { border-color: #667; color: #889; background: rgba(30, 30, 40, 0.75); }
+  /* on narrow screens there is no room beside the canvas - move it inside */
+  @media (max-width: 920px) {
+    #sound { right: 8px; top: 44px; width: 38px; height: 38px; font-size: 17px; }
+  }
   #game {
     display: block;
     width: 100%;
@@ -107,12 +131,14 @@
 <h1>◆ JERRY THE WATER SAVIOUR ◆</h1>
 <div id="stage">
   <canvas id="game" width="800" height="500"></canvas>
+  <div id="sound" role="button" tabindex="0" aria-label="Sound on" title="Sound on/off (M)">🔊</div>
 </div>
 <div id="info">
-  <kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd> to move &nbsp;•&nbsp;
-  <kbd>SPACE</kbd> / <kbd>W</kbd> / <kbd>↑</kbd> to jump &nbsp;•&nbsp;
-  <kbd>X</kbd> to throw water bomb &nbsp;•&nbsp;
-  <kbd>R</kbd> to restart
+  <kbd>←</kbd> <kbd>→</kbd> move &nbsp;•&nbsp;
+  <kbd>SPACE</kbd> / <kbd>W</kbd> / <kbd>↑</kbd> jump &nbsp;•&nbsp;
+  <kbd>X</kbd> water bomb &nbsp;•&nbsp;
+  <kbd>R</kbd> restart &nbsp;•&nbsp;
+  <kbd>M</kbd> mute
 </div>
 
 <div id="touch">
@@ -203,6 +229,221 @@ canvas.addEventListener('pointerdown', e => {
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('gesturestart', e => e.preventDefault());
 
+// ============ AUDIO ============
+// Everything is synthesised with the Web Audio API so the game stays a single
+// file with no asset downloads. Browsers block audio until the user interacts,
+// so the context is only created on the first tap/keypress.
+const audio = {
+  ctx: null,
+  master: null,
+  musicGain: null,
+  on: true,
+  timer: null,
+  step: 0,
+  track: null,
+};
+
+// Melodies per scene: [semitone offset from A2, ...], null = rest.
+const TRACKS = {
+  menu:    { bpm: 104, wave: 'triangle', bass: [0, null, 7, null, 5, null, 7, null],
+             lead: [12, 16, 19, 16, 17, 16, 12, null, 12, 16, 19, 24, 22, 19, 16, null] },
+  playing: { bpm: 132, wave: 'square',   bass: [0, 0, 7, 7, 5, 5, 3, 3],
+             lead: [12, 12, 16, 19, 17, 16, 12, 14, 16, 16, 19, 21, 19, 16, 12, null] },
+  level2:  { bpm: 142, wave: 'square',   bass: [0, 0, 6, 6, 3, 3, 5, 5],
+             lead: [12, 15, 12, 18, 17, 15, 12, null, 10, 12, 15, 17, 15, 12, 10, null] },
+  boss:    { bpm: 150, wave: 'sawtooth', bass: [0, 0, 1, 1, 0, 0, 3, 3],
+             lead: [12, 13, 12, 8, 12, 15, 12, 8, 13, 12, 8, 6, 8, 12, 13, null] },
+  villain: { bpm: 162, wave: 'sawtooth', bass: [0, 1, 0, 1, 3, 4, 3, 1],
+             lead: [12, 15, 18, 15, 13, 12, 8, 12, 18, 20, 18, 15, 13, 12, 8, null] },
+  win:     { bpm: 118, wave: 'triangle', bass: [0, 0, 5, 5, 7, 7, 0, 0],
+             lead: [12, 16, 19, 24, 19, 24, 28, null, 26, 24, 21, 19, 17, 16, 12, null] },
+  gameover:{ bpm: 76,  wave: 'triangle', bass: [0, null, -2, null, -4, null, -5, null],
+             lead: [12, 10, 8, 7, 5, 3, 0, null] },
+};
+
+const midi = n => 110 * Math.pow(2, n / 12);   // A2 = 110Hz
+
+function initAudio() {
+  if (audio.ctx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  audio.ctx = new AC();
+  audio.master = audio.ctx.createGain();
+  audio.master.gain.value = 0.9;
+  audio.master.connect(audio.ctx.destination);
+  audio.musicGain = audio.ctx.createGain();
+  audio.musicGain.gain.value = audio.on ? 0.16 : 0;
+  audio.musicGain.connect(audio.master);
+}
+
+// One short synth note.
+function tone(freq, dur, when, type, gain, dest) {
+  const c = audio.ctx;
+  const o = c.createOscillator();
+  const g = c.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, when);
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(gain, when + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0008, when + dur);
+  o.connect(g); g.connect(dest || audio.musicGain);
+  o.start(when); o.stop(when + dur + 0.03);
+}
+
+// Advances the song one sixteenth-note at a time.
+function musicTick() {
+  if (!audio.ctx || !audio.track) return;
+  const t = TRACKS[audio.track];
+  if (!t) return;
+  const beat = 60 / t.bpm / 2;          // eighth notes
+  const now = audio.ctx.currentTime + 0.05;
+  const s = audio.step;
+
+  const b = t.bass[s % t.bass.length];
+  if (b !== null && s % 2 === 0) tone(midi(b - 12), beat * 1.7, now, 'triangle', 0.5);
+
+  const l = t.lead[s % t.lead.length];
+  if (l !== null) tone(midi(l), beat * 0.85, now, t.wave, 0.22);
+
+  // light hats to keep a pulse on the action tracks
+  if (audio.track !== 'gameover' && s % 2 === 1) {
+    tone(7000 + Math.random() * 900, 0.02, now, 'square', 0.03);
+  }
+
+  audio.step++;
+  audio.timer = setTimeout(musicTick, beat * 1000);
+}
+
+function playMusic(name) {
+  if (audio.track === name) return;
+  audio.track = name;
+  audio.step = 0;
+  if (!audio.ctx) return;
+  clearTimeout(audio.timer);
+  musicTick();
+}
+
+function stopMusic() {
+  clearTimeout(audio.timer);
+  audio.timer = null;
+  audio.track = null;
+}
+
+// Short sound effects, mixed above the music.
+function sfx(kind) {
+  if (!audio.ctx || !audio.on) return;
+  const c = audio.ctx, now = c.currentTime;
+  if (kind === 'jump') {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'square';
+    o.frequency.setValueAtTime(300, now);
+    o.frequency.exponentialRampToValueAtTime(760, now + 0.11);
+    g.gain.setValueAtTime(0.16, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+    o.connect(g); g.connect(audio.master);
+    o.start(now); o.stop(now + 0.16);
+  } else if (kind === 'throw') {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(680, now);
+    o.frequency.exponentialRampToValueAtTime(200, now + 0.13);
+    g.gain.setValueAtTime(0.12, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    o.connect(g); g.connect(audio.master);
+    o.start(now); o.stop(now + 0.17);
+  } else if (kind === 'hit') {
+    // noise burst
+    const len = Math.floor(c.sampleRate * 0.16);
+    const buf = c.createBuffer(1, len, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = c.createBufferSource(); src.buffer = buf;
+    const g = c.createGain(); g.gain.value = 0.22;
+    src.connect(g); g.connect(audio.master);
+    src.start(now);
+  } else if (kind === 'power') {
+    [0, 4, 7, 12].forEach((n, i) =>
+      tone(midi(12 + n), 0.14, now + i * 0.07, 'square', 0.16, audio.master));
+  } else if (kind === 'hurt') {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(420, now);
+    o.frequency.exponentialRampToValueAtTime(90, now + 0.35);
+    g.gain.setValueAtTime(0.2, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+    o.connect(g); g.connect(audio.master);
+    o.start(now); o.stop(now + 0.4);
+  } else if (kind === 'boom') {
+    const len = Math.floor(c.sampleRate * 0.45);
+    const buf = c.createBuffer(1, len, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+    const src = c.createBufferSource(); src.buffer = buf;
+    const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
+    const g = c.createGain(); g.gain.value = 0.4;
+    src.connect(f); f.connect(g); g.connect(audio.master);
+    src.start(now);
+  }
+}
+
+function setAudioOn(on) {
+  audio.on = on;
+  if (audio.musicGain) {
+    const c = audio.ctx;
+    audio.musicGain.gain.cancelScheduledValues(c.currentTime);
+    audio.musicGain.gain.linearRampToValueAtTime(on ? 0.16 : 0, c.currentTime + 0.15);
+  }
+  const btn = document.getElementById('sound');
+  if (btn) {
+    btn.textContent = on ? '🔊' : '🔇';
+    btn.classList.toggle('off', !on);
+    btn.setAttribute('aria-label', on ? 'Sound on' : 'Sound off');
+  }
+  try { localStorage.setItem('jerry-sound', on ? '1' : '0'); } catch (e) {}
+}
+
+// Audio can only start inside a user gesture.
+function unlockAudio() {
+  initAudio();
+  if (audio.ctx && audio.ctx.state === 'suspended') audio.ctx.resume();
+  if (audio.track && !audio.timer) musicTick();
+}
+['pointerdown', 'keydown', 'touchstart'].forEach(ev =>
+  window.addEventListener(ev, unlockAudio, { passive: true }));
+
+// Sound toggle button. stopPropagation keeps the click off the canvas so it
+// cannot double as a "tap to start".
+const soundBtn = document.getElementById('sound');
+soundBtn.addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  e.preventDefault();
+  unlockAudio();
+  setAudioOn(!audio.on);
+});
+soundBtn.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.stopPropagation();
+    e.preventDefault();
+    unlockAudio();
+    setAudioOn(!audio.on);
+  }
+});
+
+// M key toggles sound too
+window.addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 'm') {
+    unlockAudio();
+    setAudioOn(!audio.on);
+  }
+});
+
+// restore the saved preference
+try {
+  const saved = localStorage.getItem('jerry-sound');
+  if (saved !== null) audio.on = saved === '1';
+} catch (e) {}
+setAudioOn(audio.on);
+
 // ============ CONSTANTS ============
 const GRAVITY = 0.55;
 const JUMP_POWER = -12.5;
@@ -224,22 +465,40 @@ let villain = null;
 let villainShots = [];   // things the villain throws at Jerry
 let screenShake = 0;
 
-// Jerry starts with the water bomb so players can fight enemies right away.
-// Bombs are not consumed: after each throw a short cooldown recharges them.
+// Two-stage powerup, Mario style. Jerry starts small with no bomb:
+//   stage 0 (small)  -- hit a power block -> stage 1
+//   stage 1 (big)    -- hit another power block -> stage 2
+//   stage 2 (armed)  -- big AND able to throw water bombs
+// Taking a hit knocks him down one stage instead of costing a life.
 const BOMB_COOLDOWN = 30; // frames (~0.5s at 60fps)
 
 const jerry = {
   x: 100, y: 300, vx: 0, vy: 0,
   w: 28, h: 36,
   onGround: false,
-  powered: false,
-  hasBomb: true,
+  stage: 0,
+  powered: false,   // stage >= 1: bigger droplet
+  hasBomb: false,   // stage 2 only: a bomb is ready to throw
   bombCooldown: 0,
   rapidBomb: false,
   facing: 1,
   invuln: 0,
   _xheld: false
 };
+
+// Applies whatever a given stage means, so every place agrees.
+function setStage(n) {
+  jerry.stage = Math.max(0, Math.min(2, n));
+  jerry.powered = jerry.stage >= 1;
+  if (jerry.stage < 2) {
+    jerry.hasBomb = false;
+    jerry.bombCooldown = 0;
+    jerry.rapidBomb = false;
+  } else {
+    jerry.hasBomb = true;
+    jerry.bombCooldown = 0;
+  }
+}
 
 // ============ LEVEL DATA ============
 const platforms = [
@@ -262,8 +521,10 @@ let signs = [];
 
 function resetLevel() {
   blocks = [
+    // two power blocks early on: first grows Jerry, second arms his bombs
     { x: 250, y: 300, w: 40, h: 40, type: 'filter',   hit: false },
     { x: 450, y: 200, w: 40, h: 40, type: 'water',    hit: false },
+    { x: 760, y: 300, w: 40, h: 40, type: 'uv',       hit: false },
     { x: 950, y: 240, w: 40, h: 40, type: 'chlorine', hit: false },
     { x: 1420, y: 220, w: 40, h: 40, type: 'water',   hit: false },
     { x: 1560, y: 140, w: 40, h: 40, type: 'uv',      hit: false },
@@ -306,9 +567,9 @@ function rectHit(a, b) {
 
 function eduText(type) {
   return ({
-    filter:   'FILTRATION: Sand & carbon filters trap dirt and solids. First step in water treatment!',
+    filter:   'FILTRATION: Sand & carbon filters trap dirt and solids.',
     chlorine: 'CHLORINATION: Chlorine kills bacteria & viruses. Used in most city water supplies.',
-    uv:       'UV DISINFECTION: Ultraviolet light kills germs without chemicals. RAPID BOMBS unlocked!',
+    uv:       'UV DISINFECTION: Ultraviolet light kills germs without chemicals.',
     water:    'Clean water collected! Every drop matters. +50 points',
   })[type];
 }
@@ -328,12 +589,18 @@ function spawnParticles(x, y, color, count) {
 
 function damagePlayer() {
   if (jerry.invuln > 0) return;
-  if (jerry.powered) {
-    jerry.powered = false;
+  // In the boss arenas bombs are the only weapon, so losing them would make the
+  // fight unwinnable - take a life instead of dropping a stage.
+  const inBossFight = gameState === 'boss' || gameState === 'villain';
+  if (jerry.stage > 0 && !inBossFight) {
+    // drop one stage: armed -> big -> small, only then lose a life
+    setStage(jerry.stage - 1);
     jerry.invuln = 90;
     spawnParticles(jerry.x + 14, jerry.y + 18, '#fff', 12);
+    sfx('hurt');
   } else {
     lives--;
+    sfx('hurt');
     if (lives <= 0) { gameState = 'gameover'; return; }
     respawnPlayer();
   }
@@ -342,6 +609,11 @@ function damagePlayer() {
 function respawnPlayer() {
   if (gameState === 'boss') {
     jerry.x = 80; jerry.y = 300;
+  } else if (gameState === 'villain') {
+    // respawn on the far side from the villain so he can't camp the spawn
+    jerry.x = villain && villain.x < W / 2 ? W - 110 : 70;
+    jerry.y = 280;
+    villainShots = [];
   } else {
     jerry.x = Math.max(100, jerry.x - 200);
     jerry.y = 200;
@@ -362,6 +634,7 @@ function updatePlaying() {
   if ((keys[' '] || keys['w'] || keys['arrowup']) && jerry.onGround) {
     jerry.vy = JUMP_POWER;
     jerry.onGround = false;
+    sfx('jump');
   }
 
   if (keys['x'] && jerry.hasBomb && !jerry._xheld) {
@@ -372,6 +645,7 @@ function updatePlaying() {
     });
     jerry.hasBomb = false;
     jerry.bombCooldown = jerry.rapidBomb ? BOMB_COOLDOWN / 3 : BOMB_COOLDOWN;
+    sfx('throw');
     jerry._xheld = true;
   }
   if (!keys['x']) jerry._xheld = false;
@@ -429,6 +703,7 @@ function updatePlaying() {
         e.alive = false;
         jerry.vy = JUMP_POWER * 0.65;
         score += 100;
+        sfx('hit');
         spawnParticles(e.x + 15, e.y + 15, '#8b6f47', 10);
       } else {
         damagePlayer();
@@ -469,6 +744,7 @@ function updatePlaying() {
         e.alive = false;
         b.dead = true;
         score += 100;
+        sfx('hit');
         spawnParticles(e.x + 15, e.y + 15, '#4af', 15);
       }
     }
@@ -492,13 +768,33 @@ function updatePlaying() {
 }
 
 function triggerBlock(b) {
-  showPopup(eduText(b.type));
   spawnParticles(b.x + 20, b.y, '#4af', 12);
-  if (b.type === 'filter')   { jerry.powered = true; score += 200; }
-  else if (b.type === 'chlorine') { lives++; score += 200; }
-  // bombs are standard now, so UV upgrades them to rapid-fire instead
-  else if (b.type === 'uv')       { jerry.rapidBomb = true; jerry.hasBomb = true; jerry.bombCooldown = 0; score += 200; }
-  else if (b.type === 'water')    { score += 50; }
+  sfx(b.type === 'filter' || b.type === 'uv' ? 'power' : 'hit');
+
+  // filter and UV are the power blocks: each one moves Jerry up a stage
+  if (b.type === 'filter' || b.type === 'uv') {
+    score += 200;
+    if (jerry.stage >= 2) {
+      // already armed - a further power block upgrades to rapid fire
+      const wasRapid = jerry.rapidBomb;
+      setStage(2);
+      jerry.rapidBomb = true;
+      spawnParticles(b.x + 20, b.y - 10, '#ff8', 14);
+      showPopup(eduText(b.type) +
+        (wasRapid ? ' Bomb recharged!' : ' RAPID BOMBS unlocked!'));
+    } else {
+      setStage(jerry.stage + 1);
+      spawnParticles(b.x + 20, b.y - 10, jerry.stage === 2 ? '#ff8' : '#fff', 18);
+      showPopup(jerry.stage === 1
+        ? eduText(b.type) + ' Jerry GREW BIGGER! Hit another power block for water bombs.'
+        : eduText(b.type) + ' WATER BOMBS unlocked - press [X] to throw!');
+    }
+    return;
+  }
+
+  showPopup(eduText(b.type));
+  if (b.type === 'chlorine') { lives++; score += 200; }
+  else if (b.type === 'water') { score += 50; }
 }
 
 // ============ BOSS ============
@@ -508,7 +804,8 @@ function startBoss() {
   camera.x = 0;
   bombs = [];
   bossActiveEnemies = [];
-  jerry.hasBomb = true;
+  // the fight is unwinnable without bombs, so arm Jerry on entry
+  setStage(2);
   boss = {
     body: { x: 430, y: 350, w: 320, h: 90 },
     stacks: [
@@ -531,6 +828,7 @@ function updateBoss() {
   if ((keys[' '] || keys['w'] || keys['arrowup']) && jerry.onGround) {
     jerry.vy = JUMP_POWER;
     jerry.onGround = false;
+    sfx('jump');
   }
 
   if (keys['x'] && jerry.hasBomb && !jerry._xheld) {
@@ -541,6 +839,7 @@ function updateBoss() {
     jerry._xheld = true;
     jerry.hasBomb = false;
     jerry.bombCooldown = jerry.rapidBomb ? BOMB_COOLDOWN / 3 : BOMB_COOLDOWN;
+    sfx('throw');
   }
   if (!keys['x']) jerry._xheld = false;
 
@@ -600,8 +899,10 @@ function updateBoss() {
       if (rectHit({ x: b.x - b.r, y: b.y - b.r, w: b.r * 2, h: b.r * 2 }, s)) {
         s.hp--;
         b.dead = true;
+        sfx('hit');
         spawnParticles(b.x, b.y, '#4af', 15);
         if (s.hp <= 0) {
+          sfx('boom');
           s.alive = false;
           score += 500;
           spawnParticles(s.x + s.w/2, s.y + 30, '#ff8800', 30);
@@ -618,10 +919,391 @@ function updateBoss() {
   }
   particles = particles.filter(p => p.life > 0);
 
+  // factory destroyed -> the man behind it shows up
   if (boss.stacks.every(s => !s.alive)) {
-    gameState = 'win';
+    startLevel2();
   }
 
+  if (jerry.invuln > 0) jerry.invuln--;
+  if (popup) { popup.timer--; if (popup.timer <= 0) popup = null; }
+}
+
+// ============ LEVEL 2 ============
+// A tighter, more hostile stretch: toxic barrels roll at Jerry, drones patrol
+// the air, and the ground is broken up by wider sewage pits.
+const L2_END = 2600;
+
+const l2Platforms = [
+  { x: 0,    y: GROUND_Y, w: 520, h: 60, kind: 'ground' },
+  { x: 640,  y: GROUND_Y, w: 420, h: 60, kind: 'ground' },
+  { x: 1180, y: GROUND_Y, w: 380, h: 60, kind: 'ground' },
+  { x: 1700, y: GROUND_Y, w: 340, h: 60, kind: 'ground' },
+  { x: 2160, y: GROUND_Y, w: 640, h: 60, kind: 'ground' },
+  { x: 300,  y: 330, w: 120, h: 18, kind: 'brick' },
+  { x: 700,  y: 300, w: 120, h: 18, kind: 'brick' },
+  { x: 980,  y: 230, w: 100, h: 18, kind: 'brick' },
+  { x: 1250, y: 320, w: 120, h: 18, kind: 'brick' },
+  { x: 1480, y: 240, w: 100, h: 18, kind: 'brick' },
+  { x: 1820, y: 300, w: 120, h: 18, kind: 'brick' },
+  { x: 2260, y: 280, w: 120, h: 18, kind: 'brick' },
+];
+
+const l2Hazards = [
+  { x: 520,  y: GROUND_Y, w: 120, h: 60 },
+  { x: 1060, y: GROUND_Y, w: 120, h: 60 },
+  { x: 1560, y: GROUND_Y, w: 140, h: 60 },
+  { x: 2040, y: GROUND_Y, w: 120, h: 60 },
+];
+
+const l2Goal = { x: L2_END - 160, y: GROUND_Y - 130, w: 40, h: 130 };
+
+function startLevel2() {
+  gameState = 'level2';
+  jerry.x = 60; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
+  jerry.invuln = 90;
+  camera.x = 0;
+  bombs = [];
+  villainShots = [];
+  bossActiveEnemies = [];
+  boss = null;
+
+  blocks = [
+    { x: 340, y: 240, w: 40, h: 40, type: 'water',    hit: false },
+    { x: 740, y: 210, w: 40, h: 40, type: 'uv',       hit: false },
+    { x: 1010,y: 140, w: 40, h: 40, type: 'chlorine', hit: false },
+    { x: 1290,y: 230, w: 40, h: 40, type: 'water',    hit: false },
+    { x: 1510,y: 150, w: 40, h: 40, type: 'filter',   hit: false },
+    { x: 1860,y: 210, w: 40, h: 40, type: 'water',    hit: false },
+    // a late power block so a player who got knocked down can re-arm
+    // before the final boss
+    { x: 2180,y: 300, w: 40, h: 40, type: 'uv',       hit: false },
+    { x: 2300,y: 190, w: 40, h: 40, type: 'chlorine', hit: false },
+  ];
+
+  enemies = [
+    // rolling toxic barrels chase along the ground
+    { x: 420,  y: GROUND_Y - 34, w: 34, h: 34, vx: -1.8, type: 'barrel', alive: true, minX: 60,   maxX: 510 },
+    { x: 900,  y: GROUND_Y - 34, w: 34, h: 34, vx:  1.8, type: 'barrel', alive: true, minX: 650,  maxX: 1050 },
+    { x: 1400, y: GROUND_Y - 34, w: 34, h: 34, vx: -2.0, type: 'barrel', alive: true, minX: 1190, maxX: 1550 },
+    { x: 1900, y: GROUND_Y - 34, w: 34, h: 34, vx:  2.0, type: 'barrel', alive: true, minX: 1710, maxX: 2030 },
+    { x: 2400, y: GROUND_Y - 34, w: 34, h: 34, vx: -2.2, type: 'barrel', alive: true, minX: 2170, maxX: 2600 },
+    // drones hover and bob in the air
+    { x: 800,  y: 250, w: 32, h: 26, vx:  1.6, type: 'drone', alive: true, minX: 660,  maxX: 1040, baseY: 250, phase: 0 },
+    { x: 1350, y: 200, w: 32, h: 26, vx: -1.6, type: 'drone', alive: true, minX: 1200, maxX: 1540, baseY: 200, phase: 1.5 },
+    { x: 1950, y: 240, w: 32, h: 26, vx:  1.8, type: 'drone', alive: true, minX: 1720, maxX: 2030, baseY: 240, phase: 3 },
+    { x: 2450, y: 210, w: 32, h: 26, vx: -1.8, type: 'drone', alive: true, minX: 2180, maxX: 2580, baseY: 210, phase: 4.5 },
+  ];
+
+  signs = [
+    { x: 120,  y: GROUND_Y - 50, text: "A greedy tycoon bought the river. His machines are everywhere. Stay sharp!" },
+    { x: 760,  y: GROUND_Y - 50, text: "DRONES guard his property. Water bombs bring them down." },
+    { x: 1740, y: GROUND_Y - 50, text: "Toxic barrels leak heavy metals like lead and mercury into groundwater." },
+  ];
+  signs.forEach(s => s.shown = false);
+
+  showPopup('LEVEL 2: The tycoon fled upriver. Chase him down and stop him for good!');
+}
+
+function updateLevel2() {
+  let ax = 0;
+  if (keys['arrowleft'] || keys['a']) ax = -MOVE_SPEED;
+  if (keys['arrowright'] || keys['d']) ax = MOVE_SPEED;
+  jerry.vx = ax;
+  if (ax !== 0) jerry.facing = Math.sign(ax);
+
+  if ((keys[' '] || keys['w'] || keys['arrowup']) && jerry.onGround) {
+    jerry.vy = JUMP_POWER;
+    jerry.onGround = false;
+    sfx('jump');
+  }
+
+  if (keys['x'] && jerry.hasBomb && !jerry._xheld) {
+    bombs.push({
+      x: jerry.x + jerry.w / 2, y: jerry.y + jerry.h / 2,
+      vx: jerry.facing * 9, vy: -1.5, r: 8
+    });
+    jerry.hasBomb = false;
+    jerry.bombCooldown = jerry.rapidBomb ? BOMB_COOLDOWN / 3 : BOMB_COOLDOWN;
+    sfx('throw');
+    jerry._xheld = true;
+  }
+  if (!keys['x']) jerry._xheld = false;
+  if (jerry.bombCooldown > 0 && --jerry.bombCooldown === 0) jerry.hasBomb = true;
+
+  jerry.vy = Math.min(15, jerry.vy + GRAVITY);
+  jerry.x += jerry.vx;
+  jerry.y += jerry.vy;
+  jerry.onGround = false;
+  if (jerry.x < 0) jerry.x = 0;
+
+  for (const p of l2Platforms.concat(blocks)) {
+    if (rectHit(jerry, p)) {
+      const prevX = jerry.x - jerry.vx;
+      const prevY = jerry.y - jerry.vy;
+      if (prevY + jerry.h <= p.y + 1) {
+        jerry.y = p.y - jerry.h; jerry.vy = 0; jerry.onGround = true;
+      } else if (prevY >= p.y + p.h - 1) {
+        jerry.y = p.y + p.h; jerry.vy = 1;
+        if (!p.hit && p.type) { p.hit = true; triggerBlock(p); }
+      } else if (prevX + jerry.w <= p.x + 1) {
+        jerry.x = p.x - jerry.w;
+      } else if (prevX >= p.x + p.w - 1) {
+        jerry.x = p.x + p.w;
+      }
+    }
+  }
+
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    e.x += e.vx;
+    if (e.x < e.minX) { e.x = e.minX; e.vx *= -1; }
+    if (e.x + e.w > e.maxX) { e.x = e.maxX - e.w; e.vx *= -1; }
+    if (e.type === 'drone') {
+      e.phase += 0.04;
+      e.y = e.baseY + Math.sin(e.phase) * 26;
+    }
+    if (jerry.invuln <= 0 && rectHit(jerry, e)) {
+      // barrels can be stomped; drones fly too fast and must be bombed
+      if (e.type === 'barrel' && jerry.vy > 1 && (jerry.y + jerry.h - jerry.vy) < e.y + 10) {
+        e.alive = false;
+        jerry.vy = JUMP_POWER * 0.65;
+        score += 150;
+        sfx('hit');
+        spawnParticles(e.x + 17, e.y + 17, '#c04040', 12);
+      } else {
+        damagePlayer();
+      }
+    }
+  }
+
+  for (const h of l2Hazards) {
+    if (jerry.y + jerry.h > h.y + 8 &&
+        jerry.x + jerry.w > h.x + 5 && jerry.x < h.x + h.w - 5) {
+      damagePlayer();
+      break;
+    }
+  }
+
+  if (jerry.y > H + 50) damagePlayer();
+
+  for (const s of signs) {
+    if (s.shown) continue;
+    if (Math.abs((jerry.x + jerry.w/2) - (s.x + 20)) < 40) {
+      s.shown = true;
+      showPopup(s.text);
+    }
+  }
+
+  for (const b of bombs) {
+    b.vy += GRAVITY * 0.5;
+    b.x += b.vx; b.y += b.vy;
+    if (b.y > H + 50 || b.x < -50 || b.x > L2_END + 50) b.dead = true;
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      if (rectHit({ x: b.x - b.r, y: b.y - b.r, w: b.r * 2, h: b.r * 2 }, e)) {
+        e.alive = false;
+        b.dead = true;
+        score += 150;
+        sfx('hit');
+        spawnParticles(e.x + 16, e.y + 13, '#4af', 15);
+      }
+    }
+  }
+  bombs = bombs.filter(b => !b.dead);
+
+  for (const p of particles) { p.vy += 0.25; p.x += p.vx; p.y += p.vy; p.life--; }
+  particles = particles.filter(p => p.life > 0);
+
+  camera.x = Math.max(0, Math.min(L2_END - W, jerry.x - 300));
+
+  if (jerry.x + jerry.w > l2Goal.x + 10) startVillain();
+
+  if (jerry.invuln > 0) jerry.invuln--;
+  if (popup) { popup.timer--; if (popup.timer <= 0) popup = null; }
+}
+
+// ============ FINAL BOSS: THE GREEDY TYCOON ============
+// He walks, jumps, throws money-bags and toxic waste, and calls in drones.
+// Jerry has to dodge and land 6 bombs while staying alive.
+function startVillain() {
+  gameState = 'villain';
+  jerry.x = 70; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
+  jerry.invuln = 90;
+  // bombs are the only way to hurt him, so make sure Jerry has them
+  setStage(2);
+  camera.x = 0;
+  bombs = [];
+  villainShots = [];
+  bossActiveEnemies = [];
+  particles = [];
+
+  villain = {
+    x: 600, y: GROUND_Y - 96, w: 54, h: 96,
+    vx: -1.9, vy: 0, onGround: true,
+    hp: 6, maxHp: 6,
+    hurt: 0,          // flash timer after taking a hit
+    attackTimer: 90,  // frames until next attack
+    phase: 1,         // gets more aggressive as hp drops
+    facing: -1,
+  };
+  showPopup('FINAL BOSS: The Greedy Tycoon! He fights back — dodge his attacks and land 6 water bombs!');
+}
+
+function updateVillain() {
+  // ---- player ----
+  let ax = 0;
+  if (keys['arrowleft'] || keys['a']) ax = -MOVE_SPEED;
+  if (keys['arrowright'] || keys['d']) ax = MOVE_SPEED;
+  jerry.vx = ax;
+  if (ax !== 0) jerry.facing = Math.sign(ax);
+
+  if ((keys[' '] || keys['w'] || keys['arrowup']) && jerry.onGround) {
+    jerry.vy = JUMP_POWER;
+    jerry.onGround = false;
+    sfx('jump');
+  }
+
+  if (keys['x'] && jerry.hasBomb && !jerry._xheld) {
+    bombs.push({
+      x: jerry.x + jerry.w / 2, y: jerry.y + jerry.h / 2,
+      vx: jerry.facing * 9, vy: -2, r: 9
+    });
+    jerry.hasBomb = false;
+    jerry.bombCooldown = jerry.rapidBomb ? BOMB_COOLDOWN / 3 : BOMB_COOLDOWN;
+    sfx('throw');
+    jerry._xheld = true;
+  }
+  if (!keys['x']) jerry._xheld = false;
+  if (jerry.bombCooldown > 0 && --jerry.bombCooldown === 0) jerry.hasBomb = true;
+
+  jerry.vy = Math.min(15, jerry.vy + GRAVITY);
+  jerry.x += jerry.vx; jerry.y += jerry.vy;
+  jerry.onGround = false;
+
+  // arena platforms let Jerry get height to dodge
+  const arena = [
+    { x: 0, y: GROUND_Y, w: W, h: 60 },
+    { x: 120, y: 330, w: 110, h: 16 },
+    { x: 570, y: 330, w: 110, h: 16 },
+    { x: 345, y: 240, w: 110, h: 16 },
+  ];
+  for (const p of arena) {
+    if (rectHit(jerry, p)) {
+      const prevY = jerry.y - jerry.vy;
+      if (prevY + jerry.h <= p.y + 1) {
+        jerry.y = p.y - jerry.h; jerry.vy = 0; jerry.onGround = true;
+      }
+    }
+  }
+  if (jerry.x < 0) jerry.x = 0;
+  if (jerry.x + jerry.w > W) jerry.x = W - jerry.w;
+
+  // ---- villain AI ----
+  const v = villain;
+  v.phase = v.hp <= 2 ? 3 : (v.hp <= 4 ? 2 : 1);
+
+  // pace back and forth, turning at the arena edges
+  v.x += v.vx;
+  if (v.x < 40) { v.x = 40; v.vx = Math.abs(v.vx); }
+  if (v.x + v.w > W - 40) { v.x = W - 40 - v.w; v.vx = -Math.abs(v.vx); }
+  v.facing = Math.sign(v.vx) || -1;
+
+  // gravity for his jumps
+  v.vy += GRAVITY;
+  v.y += v.vy;
+  if (v.y + v.h >= GROUND_Y) { v.y = GROUND_Y - v.h; v.vy = 0; v.onGround = true; }
+
+  if (v.hurt > 0) v.hurt--;
+
+  // attacks get faster in later phases
+  v.attackTimer--;
+  if (v.attackTimer <= 0) {
+    const gap = [110, 80, 55][v.phase - 1];
+    v.attackTimer = gap + Math.floor(Math.random() * 30);
+
+    const roll = Math.random();
+    if (roll < 0.45) {
+      // hurl a money bag on a lobbing arc towards Jerry
+      const dir = Math.sign((jerry.x + jerry.w/2) - (v.x + v.w/2)) || -1;
+      villainShots.push({
+        x: v.x + v.w/2, y: v.y + 20,
+        vx: dir * (3.2 + v.phase * 0.5), vy: -5,
+        r: 12, kind: 'money', spin: 0
+      });
+    } else if (roll < 0.8) {
+      // splash of toxic waste: a spread of falling blobs
+      const n = 2 + v.phase;
+      for (let i = 0; i < n; i++) {
+        villainShots.push({
+          x: v.x + v.w/2, y: v.y + 10,
+          vx: (i - (n - 1) / 2) * 1.9,
+          vy: -6.5,
+          r: 9, kind: 'toxic', spin: 0
+        });
+      }
+    } else {
+      // leap towards Jerry
+      if (v.onGround) {
+        v.vy = -11;
+        v.onGround = false;
+        v.vx = (Math.sign((jerry.x + jerry.w/2) - (v.x + v.w/2)) || -1) * (2.2 + v.phase * 0.4);
+      }
+    }
+  }
+
+  // body contact hurts
+  if (jerry.invuln <= 0 && rectHit(jerry, v)) damagePlayer();
+
+  // ---- villain projectiles ----
+  for (const s of villainShots) {
+    s.vy += GRAVITY * 0.55;
+    s.x += s.vx; s.y += s.vy;
+    s.spin += 0.2;
+    if (s.y - s.r > H || s.x < -60 || s.x > W + 60) s.dead = true;
+    // bounce money bags once off the floor so they stay dangerous
+    if (s.kind === 'money' && s.y + s.r >= GROUND_Y && s.vy > 0) {
+      if (!s.bounced) { s.vy = -5.5; s.bounced = true; }
+      else s.dead = true;
+    }
+    if (!s.dead && jerry.invuln <= 0 &&
+        rectHit({ x: s.x - s.r, y: s.y - s.r, w: s.r*2, h: s.r*2 }, jerry)) {
+      s.dead = true;
+      damagePlayer();
+    }
+  }
+  villainShots = villainShots.filter(s => !s.dead);
+
+  // ---- Jerry's bombs vs the villain ----
+  for (const b of bombs) {
+    b.vy += GRAVITY * 0.5;
+    b.x += b.vx; b.y += b.vy;
+    if (b.y > H + 50 || b.x < -50 || b.x > W + 50) b.dead = true;
+    if (!b.dead && v.hurt <= 0 &&
+        rectHit({ x: b.x - b.r, y: b.y - b.r, w: b.r*2, h: b.r*2 }, v)) {
+      b.dead = true;
+      v.hp--;
+      v.hurt = 30;
+      screenShake = 12;
+      score += 400;
+      sfx('boom');
+      spawnParticles(b.x, b.y, '#4af', 18);
+      spawnParticles(v.x + v.w/2, v.y + 30, '#fff', 12);
+      // knock him back a little
+      v.vx = Math.sign(v.x - jerry.x) * Math.abs(v.vx) || v.vx;
+      if (v.hp <= 0) {
+        spawnParticles(v.x + v.w/2, v.y + v.h/2, '#ff8800', 40);
+        spawnParticles(v.x + v.w/2, v.y + v.h/2, '#fff', 30);
+        score += 1500;
+        gameState = 'win';
+      }
+    }
+  }
+  bombs = bombs.filter(b => !b.dead);
+
+  for (const p of particles) { p.vy += 0.25; p.x += p.vx; p.y += p.vy; p.life--; }
+  particles = particles.filter(p => p.life > 0);
+
+  if (screenShake > 0) screenShake--;
   if (jerry.invuln > 0) jerry.invuln--;
   if (popup) { popup.timer--; if (popup.timer <= 0) popup = null; }
 }
@@ -633,6 +1315,16 @@ function drawSky() {
     g.addColorStop(0, '#4a2540');
     g.addColorStop(0.5, '#8b4a3a');
     g.addColorStop(1, '#c47a4a');
+  } else if (gameState === 'villain') {
+    // stormy showdown sky
+    g.addColorStop(0, '#1a1030');
+    g.addColorStop(0.55, '#4a2a50');
+    g.addColorStop(1, '#8a4a5a');
+  } else if (gameState === 'level2') {
+    // polluted haze
+    g.addColorStop(0, '#7a86a8');
+    g.addColorStop(0.6, '#b9a48c');
+    g.addColorStop(1, '#d8c4a0');
   } else {
     g.addColorStop(0, '#6bd6ff');
     g.addColorStop(1, '#c9f2ff');
@@ -642,8 +1334,10 @@ function drawSky() {
 }
 
 function drawClouds() {
-  const isBoss = gameState === 'boss';
-  ctx.fillStyle = isBoss ? 'rgba(80,40,30,0.6)' : 'rgba(255,255,255,0.75)';
+  const dark = gameState === 'boss' || gameState === 'villain';
+  ctx.fillStyle = dark ? 'rgba(80,40,30,0.6)'
+    : gameState === 'level2' ? 'rgba(120,110,100,0.55)'
+    : 'rgba(255,255,255,0.75)';
   const off = (camera.x * 0.3) % 240;
   for (let i = -1; i < 6; i++) {
     const cx = i * 240 - off + 40;
@@ -656,12 +1350,14 @@ function drawClouds() {
   }
 }
 
-function drawGround() {
-  for (const p of platforms) {
+function drawGround(list) {
+  // level 2 ground is scorched rather than green
+  const dead = gameState === 'level2';
+  for (const p of (list || platforms)) {
     if (p.kind === 'ground') {
-      ctx.fillStyle = '#5a8c3a';
+      ctx.fillStyle = dead ? '#6b6a45' : '#5a8c3a';
       ctx.fillRect(p.x, p.y, p.w, 10);
-      ctx.fillStyle = '#7cb85a';
+      ctx.fillStyle = dead ? '#8a8558' : '#7cb85a';
       for (let i = 0; i < p.w; i += 12) {
         ctx.fillRect(p.x + i, p.y - 3, 8, 5);
       }
@@ -693,8 +1389,8 @@ function drawGround() {
   }
 }
 
-function drawHazards() {
-  for (const h of hazards) {
+function drawHazards(list) {
+  for (const h of (list || hazards)) {
     ctx.fillStyle = '#4a3a1a';
     ctx.fillRect(h.x, h.y, h.w, h.h);
     ctx.fillStyle = '#3a2a0a';
@@ -794,8 +1490,230 @@ function drawEnemies() {
       // drip
       ctx.fillStyle = '#4a2a0a';
       ctx.fillRect(e.x + 5, e.y + e.h - 2, 6, 4);
+    } else if (e.type === 'barrel') {
+      // rolling toxic barrel
+      const cx = e.x + e.w/2, cy = e.y + e.h/2, r = e.w/2;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate((e.x * 0.06) * (e.vx > 0 ? 1 : -1));
+      ctx.fillStyle = '#a83a2a';
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#5a1a10'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.strokeStyle = '#701f14';
+      ctx.beginPath();
+      ctx.moveTo(-r, -r*0.35); ctx.lineTo(r, -r*0.35);
+      ctx.moveTo(-r, r*0.35);  ctx.lineTo(r, r*0.35);
+      ctx.stroke();
+      ctx.fillStyle = '#ff0';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillText('☠', -5, 5);
+      ctx.restore();
+      // leaking sludge
+      ctx.fillStyle = 'rgba(90,120,30,0.75)';
+      ctx.fillRect(e.x + 8, e.y + e.h - 2, 8, 4);
+    } else if (e.type === 'drone') {
+      const cx = e.x + e.w/2;
+      // rotors
+      ctx.strokeStyle = '#889';
+      ctx.lineWidth = 2;
+      const blur = Math.sin(Date.now() * 0.05) * 6;
+      ctx.beginPath();
+      ctx.moveTo(e.x - 4 + blur, e.y); ctx.lineTo(e.x + 12 - blur, e.y);
+      ctx.moveTo(e.x + e.w - 12 + blur, e.y); ctx.lineTo(e.x + e.w + 4 - blur, e.y);
+      ctx.stroke();
+      ctx.fillStyle = '#667';
+      ctx.fillRect(e.x + 3, e.y + 2, 5, 5);
+      ctx.fillRect(e.x + e.w - 8, e.y + 2, 5, 5);
+      // body
+      ctx.fillStyle = '#4a4a58';
+      ctx.fillRect(e.x, e.y + 6, e.w, e.h - 6);
+      ctx.strokeStyle = '#22222c';
+      ctx.strokeRect(e.x, e.y + 6, e.w, e.h - 6);
+      // angry red eye scanning
+      ctx.fillStyle = '#f33';
+      const ex = cx + (e.vx > 0 ? 4 : -4);
+      ctx.beginPath(); ctx.arc(ex, e.y + 14, 4, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,60,60,0.35)';
+      ctx.beginPath(); ctx.arc(ex, e.y + 14, 7, 0, Math.PI*2); ctx.fill();
     }
   }
+}
+
+// ============ LEVEL 2 / VILLAIN RENDER ============
+function drawL2Goal() {
+  const g = l2Goal;
+  ctx.fillStyle = '#a33';
+  ctx.fillRect(g.x, g.y, g.w, g.h);
+  ctx.fillStyle = '#d55';
+  ctx.fillRect(g.x - 10, g.y, g.w + 20, 20);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('TYCOON', g.x - 8, g.y - 8);
+  ctx.fillStyle = '#fbb';
+  for (let i = 0; i < 4; i++) {
+    const t = (Date.now() * 0.003 + i * 0.4) % 1;
+    ctx.globalAlpha = 1 - t;
+    ctx.fillRect(g.x + 8, g.y + 30 + t * 80, 24, 4);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawVillain() {
+  const v = villain;
+  // flash white when he has just been hit
+  const flash = v.hurt > 0 && Math.floor(Date.now() / 60) % 2 === 0;
+
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(v.x + v.w/2, GROUND_Y + 3, v.w/2, 5, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  const skin = flash ? '#fff' : '#e8b98a';
+  const suit = flash ? '#fff' : '#2a2a3a';
+
+  // legs
+  ctx.fillStyle = suit;
+  ctx.fillRect(v.x + 10, v.y + 62, 14, 34);
+  ctx.fillRect(v.x + v.w - 24, v.y + 62, 14, 34);
+  // shoes
+  ctx.fillStyle = flash ? '#fff' : '#111';
+  ctx.fillRect(v.x + 6, v.y + v.h - 8, 20, 8);
+  ctx.fillRect(v.x + v.w - 26, v.y + v.h - 8, 20, 8);
+
+  // fat greedy body in a business suit
+  ctx.fillStyle = suit;
+  ctx.fillRect(v.x, v.y + 26, v.w, 40);
+  // open jacket + white shirt
+  ctx.fillStyle = flash ? '#fff' : '#f0f0f0';
+  ctx.fillRect(v.x + v.w/2 - 9, v.y + 28, 18, 34);
+  // tie
+  ctx.fillStyle = flash ? '#fff' : '#c0392b';
+  ctx.beginPath();
+  ctx.moveTo(v.x + v.w/2, v.y + 28);
+  ctx.lineTo(v.x + v.w/2 - 5, v.y + 36);
+  ctx.lineTo(v.x + v.w/2, v.y + 58);
+  ctx.lineTo(v.x + v.w/2 + 5, v.y + 36);
+  ctx.closePath(); ctx.fill();
+
+  // arms
+  ctx.fillStyle = suit;
+  ctx.fillRect(v.x - 6, v.y + 30, 10, 26);
+  ctx.fillRect(v.x + v.w - 4, v.y + 30, 10, 26);
+  ctx.fillStyle = skin;
+  ctx.fillRect(v.x - 6, v.y + 54, 10, 8);
+  ctx.fillRect(v.x + v.w - 4, v.y + 54, 10, 8);
+
+  // head
+  ctx.fillStyle = skin;
+  ctx.fillRect(v.x + 12, v.y + 2, v.w - 24, 26);
+  // top hat — classic tycoon
+  ctx.fillStyle = flash ? '#fff' : '#15151f';
+  ctx.fillRect(v.x + 6, v.y - 2, v.w - 12, 5);
+  ctx.fillRect(v.x + 13, v.y - 18, v.w - 26, 17);
+  ctx.fillStyle = flash ? '#ccc' : '#c0392b';
+  ctx.fillRect(v.x + 13, v.y - 7, v.w - 26, 4);
+
+  // angry eyes follow Jerry
+  const look = v.facing > 0 ? 2 : -2;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(v.x + 17, v.y + 10, 8, 7);
+  ctx.fillRect(v.x + v.w - 25, v.y + 10, 8, 7);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(v.x + 19 + look, v.y + 12, 4, 4);
+  ctx.fillRect(v.x + v.w - 23 + look, v.y + 12, 4, 4);
+  // furious brows
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(v.x + 16, v.y + 7); ctx.lineTo(v.x + 26, v.y + 11);
+  ctx.moveTo(v.x + v.w - 16, v.y + 7); ctx.lineTo(v.x + v.w - 26, v.y + 11);
+  ctx.stroke();
+  // grimace
+  ctx.beginPath();
+  ctx.moveTo(v.x + 20, v.y + 24); ctx.lineTo(v.x + v.w - 20, v.y + 24);
+  ctx.stroke();
+  // cigar
+  ctx.fillStyle = flash ? '#fff' : '#6b3d1a';
+  ctx.fillRect(v.x + v.w - 18, v.y + 21, 12, 4);
+  ctx.fillStyle = '#f80';
+  ctx.fillRect(v.x + v.w - 7, v.y + 21, 3, 4);
+
+  // health bar above him
+  const bw = 90, bx = v.x + v.w/2 - bw/2, by = v.y - 32;
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(bx - 2, by - 2, bw + 4, 12);
+  ctx.fillStyle = '#500';
+  ctx.fillRect(bx, by, bw, 8);
+  ctx.fillStyle = v.hp > 4 ? '#3d3' : v.hp > 2 ? '#fd3' : '#f44';
+  ctx.fillRect(bx, by, bw * (v.hp / v.maxHp), 8);
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+  ctx.strokeRect(bx, by, bw, 8);
+}
+
+function drawVillainShots() {
+  for (const s of villainShots) {
+    if (s.kind === 'money') {
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.spin);
+      ctx.fillStyle = '#c8a83a';
+      ctx.beginPath(); ctx.arc(0, 0, s.r, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#6b5410'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#3a2a08';
+      ctx.font = 'bold 13px monospace';
+      ctx.fillText('$', -4, 5);
+      ctx.restore();
+    } else {
+      // toxic blob
+      ctx.fillStyle = 'rgba(120,200,40,0.9)';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#3a6b10'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = 'rgba(200,255,120,0.9)';
+      ctx.beginPath(); ctx.arc(s.x - 3, s.y - 3, s.r * 0.35, 0, Math.PI*2); ctx.fill();
+    }
+  }
+}
+
+function drawVillainScene() {
+  // arena floor
+  ctx.fillStyle = '#4a3a4a';
+  ctx.fillRect(0, GROUND_Y, W, 60);
+  ctx.fillStyle = '#2a1f2a';
+  ctx.fillRect(0, GROUND_Y, W, 6);
+  for (let i = 0; i < 6; i++) {
+    ctx.fillStyle = 'rgba(120,90,20,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(70 + i * 130, GROUND_Y + 16, 34, 5, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // money piles he is standing on
+  for (let i = 0; i < 3; i++) {
+    const bx = 150 + i * 260;
+    ctx.fillStyle = '#2f7a3f';
+    ctx.fillRect(bx, GROUND_Y - 10, 60, 10);
+    ctx.fillStyle = '#3d9b52';
+    ctx.fillRect(bx + 6, GROUND_Y - 16, 48, 8);
+    ctx.fillStyle = '#1d5a2c';
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText('$$$', bx + 20, GROUND_Y - 3);
+  }
+
+  // arena platforms
+  const arena = [
+    { x: 120, y: 330, w: 110, h: 16 },
+    { x: 570, y: 330, w: 110, h: 16 },
+    { x: 345, y: 240, w: 110, h: 16 },
+  ];
+  for (const p of arena) {
+    ctx.fillStyle = '#6a5a6a';
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.strokeStyle = '#3a2f3a'; ctx.lineWidth = 2;
+    ctx.strokeRect(p.x, p.y, p.w, p.h);
+  }
+
+  drawVillain();
+  drawVillainShots();
 }
 
 function drawGoal() {
@@ -1047,20 +1965,36 @@ function drawHUD() {
   for (let i = 0; i < lives; i++) {
     drawMiniDroplet(535 + i * 22, 15);
   }
-  // bomb is always available, so show ready vs recharging
-  if (jerry.hasBomb) {
+  // powerup stage: no bomb until Jerry has hit two power blocks
+  if (jerry.stage < 2) {
+    ctx.fillStyle = '#789';
+    ctx.fillText(jerry.stage === 0 ? 'HIT ? BLOCKS' : 'BIG! ONE MORE ?', 640, 23);
+  } else if (jerry.hasBomb) {
     ctx.fillStyle = jerry.rapidBomb ? '#ff8' : '#4af';
     ctx.fillText(jerry.rapidBomb ? '[X] RAPID!' : '[X] BOMB', 655, 23);
   } else {
     ctx.fillStyle = '#567';
     ctx.fillText('[X] ...', 655, 23);
   }
+  // level name on the second row, clear of the bomb indicator above it
+  ctx.font = 'bold 12px monospace';
+  ctx.fillStyle = '#8bc';
+  const label = gameState === 'level2' ? 'LEVEL 2'
+    : gameState === 'villain' ? 'FINAL BOSS'
+    : gameState === 'boss' ? 'LEVEL 1 - BOSS'
+    : 'LEVEL 1';
+  ctx.fillText(label, W - 130, 55);
+
+  // keep boss status on the HUD strip, not at the bottom edge where it hides
   if (gameState === 'boss') {
-    // keep boss status on the HUD strip, not at the bottom edge where it hides
     const alive = boss.stacks.filter(s => s.alive).length;
     ctx.fillStyle = '#f44';
     ctx.font = 'bold 14px monospace';
     ctx.fillText('BOSS  STACKS LEFT: ' + alive + '/3', 15, 55);
+  } else if (gameState === 'villain' && villain) {
+    ctx.fillStyle = '#f66';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText('THE GREEDY TYCOON  HP: ' + villain.hp + '/' + villain.maxHp, 15, 55);
   }
 }
 
@@ -1083,8 +2017,8 @@ function drawPopup() {
   ctx.font = 'bold 18px monospace';
   const lines = wrapLines(popup.text, textW);
   const boxH = pad + 22 + lines.length * lh + pad - 8;
-  // clear the HUD, and the extra boss status line when it is showing
-  const boxY = gameState === 'boss' ? 66 : 46;
+  // clear the HUD, and the extra status line the boss fights add
+  const boxY = (gameState === 'boss' || gameState === 'villain') ? 66 : 46;
 
   // drop shadow so the panel separates from the sky behind it
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
@@ -1222,13 +2156,14 @@ function drawMenu() {
   ctx.fillText('◆ MISSION ◆', W/2, 290);
   ctx.fillStyle = '#fff';
   ctx.font = '13px monospace';
-  ctx.fillText('Waste is choking our waters. Throw water bombs or', W/2, 315);
-  ctx.fillText('jump on trash goons, avoid sewage, break blocks', W/2, 333);
-  ctx.fillText('from below to unlock water treatment tech!', W/2, 351);
+  ctx.fillText('Waste is choking our waters. Jump on trash goons,', W/2, 315);
+  ctx.fillText('avoid sewage, and hit ? blocks from below:', W/2, 333);
+  ctx.fillText('1st makes Jerry BIG, 2nd unlocks WATER BOMBS!', W/2, 351);
   ctx.fillStyle = '#ff8';
   ctx.fillText('FILTER · CHLORINE · UV LIGHT', W/2, 375);
   ctx.fillStyle = '#fff';
-  ctx.fillText('Reach the factory and destroy it with water bombs.', W/2, 400);
+  ctx.fillStyle = '#f88';
+  ctx.fillText('2 LEVELS + the Greedy Tycoon final boss!', W/2, 400);
 
   ctx.fillStyle = '#0f0';
   ctx.font = 'bold 18px monospace';
@@ -1289,7 +2224,7 @@ function drawWin() {
 
   ctx.font = '14px monospace';
   ctx.fillStyle = '#c8e8ff';
-  ctx.fillText('Jerry stopped the polluters. Fish are returning.', W/2, 135);
+  ctx.fillText('The greedy tycoon is finished. Fish are returning.', W/2, 135);
   ctx.fillText('Children can drink clean water again.', W/2, 155);
 
   ctx.fillStyle = '#ff8';
@@ -1301,6 +2236,7 @@ function drawWin() {
     'CHLORINATION kills harmful bacteria & pathogens',
     'UV DISINFECTION cleans water without chemicals',
     'INDUSTRIAL WASTE is a major cause of river pollution',
+    'GREED harms ecosystems - hold polluters accountable',
     'Every citizen can help protect our water sources',
   ];
   ctx.textAlign = 'left';
@@ -1330,8 +2266,7 @@ function drawWin() {
 function fullReset() {
   score = 0; lives = 3;
   jerry.x = 100; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
-  jerry.powered = false; jerry.hasBomb = true;
-  jerry.bombCooldown = 0; jerry.rapidBomb = false;
+  setStage(0);   // start small, no bomb - power blocks earn it
   jerry.invuln = 60; jerry.facing = 1;
   camera.x = 0;
   bombs = [];
@@ -1339,6 +2274,9 @@ function fullReset() {
   bossActiveEnemies = [];
   popup = null;
   boss = null;
+  villain = null;
+  villainShots = [];
+  screenShake = 0;
   resetLevel();
 }
 
@@ -1347,7 +2285,10 @@ function draw() {
   drawSky();
   drawClouds();
   ctx.save();
-  ctx.translate(-camera.x, 0);
+  // impact shake during the final fight
+  const sx = screenShake > 0 ? (Math.random() - 0.5) * screenShake : 0;
+  const sy = screenShake > 0 ? (Math.random() - 0.5) * screenShake : 0;
+  ctx.translate(-camera.x + sx, sy);
   if (gameState === 'playing') {
     drawGround();
     drawHazards();
@@ -1355,8 +2296,17 @@ function draw() {
     drawBlocks();
     drawGoal();
     drawEnemies();
+  } else if (gameState === 'level2') {
+    drawGround(l2Platforms);
+    drawHazards(l2Hazards);
+    drawSigns();
+    drawBlocks();
+    drawL2Goal();
+    drawEnemies();
   } else if (gameState === 'boss') {
     drawBossScene();
+  } else if (gameState === 'villain') {
+    drawVillainScene();
   }
   drawJerry();
   drawBombs();
@@ -1371,6 +2321,9 @@ function loop() {
   const tapped = tapConfirm;
   tapConfirm = false;
 
+  // each scene has its own theme; playMusic ignores repeat calls
+  playMusic(gameState);
+
   if (gameState === 'menu') {
     drawMenu();
     if (keys['enter'] || tapped) {
@@ -1382,6 +2335,12 @@ function loop() {
     draw();
   } else if (gameState === 'boss') {
     updateBoss();
+    draw();
+  } else if (gameState === 'level2') {
+    updateLevel2();
+    draw();
+  } else if (gameState === 'villain') {
+    updateVillain();
     draw();
   } else if (gameState === 'gameover') {
     draw();
