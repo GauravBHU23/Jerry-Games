@@ -2133,7 +2133,8 @@ function drawSky() {
     g.addColorStop(1, sky[1]);
   }
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, VIEW_W, H);   // fill the whole view, not just the UI box
+  // fill the whole view, with a little slack so rounding leaves no edge line
+  ctx.fillRect(-2, 0, VIEW_W + 4, H);
 }
 
 function drawClouds() {
@@ -3089,17 +3090,17 @@ function drawLeaderboard() {
   g.addColorStop(0, '#04182f');
   g.addColorStop(1, '#0a3a63');
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(-VIEW_X - 2, 0, VIEW_W + 4, H);
 
-  // faint moving water bands for depth
+  // faint moving water bands for depth, across the full view
   for (let i = 0; i < 3; i++) {
     ctx.fillStyle = `rgba(74,175,255,${0.04 + i * 0.02})`;
     ctx.beginPath();
-    ctx.moveTo(0, H);
-    for (let x = 0; x <= W; x += 16) {
+    ctx.moveTo(-VIEW_X, H);
+    for (let x = -VIEW_X; x <= VIEW_W - VIEW_X; x += 16) {
       ctx.lineTo(x, H - 40 - i * 26 + Math.sin((x + Date.now() * 0.0006 + i * 2) * 0.012) * 9);
     }
-    ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+    ctx.lineTo(VIEW_W - VIEW_X, H); ctx.closePath(); ctx.fill();
   }
 
   ctx.textAlign = 'center';
@@ -3236,37 +3237,45 @@ function drawLeaderboard() {
 }
 
 function drawMenu() {
+  // backgrounds are drawn across the whole view, not just the 800-wide UI box,
+  // so a wide screen has no dark bars down the sides
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, '#0a3a70');
   g.addColorStop(0.5, '#1a7abc');
   g.addColorStop(1, '#4ab0e8');
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(-VIEW_X - 2, 0, VIEW_W + 4, H);
 
   // decorative water waves at bottom
   for (let layer = 0; layer < 3; layer++) {
     ctx.fillStyle = `rgba(74,175,255,${0.3 + layer * 0.2})`;
     ctx.beginPath();
-    ctx.moveTo(0, H);
-    for (let x = 0; x <= W; x += 10) {
+    ctx.moveTo(-VIEW_X, H);
+    for (let x = -VIEW_X; x <= VIEW_W - VIEW_X; x += 10) {
       const y = H - 60 + layer * 20 + Math.sin((x + Date.now() * 0.001 + layer) * 0.02) * 8;
       ctx.lineTo(x, y);
     }
-    ctx.lineTo(W, H);
+    ctx.lineTo(VIEW_W - VIEW_X, H);
     ctx.closePath();
     ctx.fill();
   }
 
-  // title
+  // title. A thick stroke eats into the letters and makes them look blurred,
+  // so keep it thin, round the joins, and stroke before filling.
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#fff';
-  ctx.strokeStyle = '#4af';
-  ctx.lineWidth = 5;
-  ctx.font = 'bold 54px monospace';
+  ctx.lineJoin = 'round';
+  ctx.miterLimit = 2;
   const bob = Math.sin(Date.now() * 0.003) * 3;
+
+  ctx.font = 'bold 54px monospace';
+  ctx.strokeStyle = '#0a3a70';
+  ctx.lineWidth = 3;
   ctx.strokeText('JERRY', W/2, 90 + bob);
+  ctx.fillStyle = '#fff';
   ctx.fillText('JERRY', W/2, 90 + bob);
+
   ctx.font = 'bold 26px monospace';
+  ctx.lineWidth = 2.5;
   ctx.strokeText('THE WATER SAVIOUR', W/2, 130 + bob);
   ctx.fillText('THE WATER SAVIOUR', W/2, 130 + bob);
 
@@ -3359,7 +3368,7 @@ function drawMenu() {
 
 function drawGameOver() {
   ctx.fillStyle = 'rgba(0,0,0,0.88)';
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(-VIEW_X - 2, 0, VIEW_W + 4, H);
   ctx.textAlign = 'center';
   ctx.fillStyle = '#f44';
   ctx.font = 'bold 52px monospace';
@@ -3387,12 +3396,13 @@ function drawWin() {
   g.addColorStop(0, '#0a4a80');
   g.addColorStop(1, '#1aa0e8');
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(-VIEW_X - 2, 0, VIEW_W + 4, H);
 
-  // celebratory water drops falling
-  for (let i = 0; i < 30; i++) {
+  // celebratory water drops falling across the whole view
+  const drops = Math.round(30 * VIEW_W / W);
+  for (let i = 0; i < drops; i++) {
     const t = (Date.now() * 0.001 + i * 0.3) % 3;
-    const x = (i * 37) % W;
+    const x = ((i * 37) % VIEW_W) - VIEW_X;
     const y = t * H / 3;
     ctx.fillStyle = 'rgba(200,232,255,0.8)';
     ctx.beginPath();
@@ -3401,11 +3411,13 @@ function drawWin() {
   }
 
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#fff';
-  ctx.strokeStyle = '#4af';
-  ctx.lineWidth = 4;
+  ctx.lineJoin = 'round';
+  ctx.miterLimit = 2;
+  ctx.strokeStyle = '#063a63';
+  ctx.lineWidth = 3;
   ctx.font = 'bold 36px monospace';
   ctx.strokeText('★ VICTORY ★', W/2, 70);
+  ctx.fillStyle = '#fff';
   ctx.fillText('★ VICTORY ★', W/2, 70);
   ctx.font = 'bold 20px monospace';
   ctx.fillText('THE RIVER IS SAVED!', W/2, 105);
@@ -3518,13 +3530,9 @@ function draw() {
   ctx.restore();
 }
 
-// Full-screen menus are laid out in the 800-wide box. On a wider view we paint
-// the side margins first so nothing shows through, then draw them centred.
+// Full-screen menus lay their content out in the 800-wide box, centred in the
+// view. Each one paints its own background across the full width.
 function centred(drawFn) {
-  if (VIEW_X > 0) {
-    ctx.fillStyle = '#04182f';
-    ctx.fillRect(0, 0, VIEW_W, H);
-  }
   ctx.save();
   ctx.translate(VIEW_X, 0);
   drawFn();
