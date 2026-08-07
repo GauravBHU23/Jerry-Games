@@ -1,0 +1,16 @@
+{
+  "name": "jerry-the-water-saviour",
+  "version": "1.0.0",
+  "private": true,
+  "description": "An educational platformer about water pollution and treatment, with a shared leaderboard.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

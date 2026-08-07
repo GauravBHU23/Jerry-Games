@@ -641,7 +641,7 @@ async function loadSavedPlayer() {
   const id = store.get(ID_KEY);
   if (!id) return false;
   try {
-    const p = await apiJson(`${API}/player/${encodeURIComponent(id)}`);
+    const p = await apiJson(`${API}/player?id=${encodeURIComponent(id)}`);
     applyProfile(p);
     profile.returning = true;
     flushPendingScores();
@@ -907,6 +907,69 @@ const LEVELS = [
 ];
 
 const FINAL_LEVEL = LEVELS.length;   // 8
+
+// ============ BOSSES ============
+// Every level ends with the polluter behind it. They get steadily tougher:
+// more health, faster attacks, and extra attack types unlocked by `moves`.
+//
+//  hp        bombs needed
+//  gap       frames between attacks (lower = more aggressive)
+//  speed     how fast the boss paces
+//  moves     which attacks it can use
+//  minions   enemy type it summons (null = none)
+const BOSSES = [
+  { n: 1, name: 'THE TRASH BARON', title: 'Illegal Dumping',
+    hp: 4,  gap: 110, speed: 1.6, w: 52, h: 74, color: '#4a4a3a', accent: '#7a6a2a',
+    moves: ['lob'], minions: null, minionGap: 0,
+    taunt: 'THE TRASH BARON dumps waste for profit. Bomb him!',
+    fact: 'Illegal dumping poisons rivers for decades. Report it!' },
+
+  { n: 2, name: 'DRUM WARDEN', title: 'Chemical Storage',
+    hp: 5,  gap: 100, speed: 1.8, w: 54, h: 78, color: '#7a3a2a', accent: '#c04040',
+    moves: ['lob', 'spray'], minions: 'drum', minionGap: 300,
+    taunt: 'DRUM WARDEN hoards leaking chemical drums. Take him down!',
+    fact: 'Corroded drums leak solvents straight into groundwater.' },
+
+  { n: 3, name: 'SLUDGE BARGE', title: 'Waste Transport',
+    hp: 6,  gap: 92,  speed: 1.9, w: 62, h: 72, color: '#3a4a2a', accent: '#7aa83a',
+    moves: ['spray', 'slam'], minions: 'barrel', minionGap: 280,
+    taunt: 'The SLUDGE BARGE empties its tanks into the marsh!',
+    fact: 'Dumping sludge at sea was banned worldwide - but it still happens.' },
+
+  { n: 4, name: 'DRONE MARSHAL', title: 'Private Security',
+    hp: 7,  gap: 84,  speed: 2.1, w: 56, h: 76, color: '#3a3a4a', accent: '#5a6a9a',
+    moves: ['lob', 'summon'], minions: 'drone', minionGap: 190,
+    taunt: 'The DRONE MARSHAL guards the polluters. Clear the skies!',
+    fact: 'Communities that monitor rivers force polluters to clean up.' },
+
+  { n: 5, name: 'PIPE FOREMAN', title: 'Effluent Pipes',
+    hp: 8,  gap: 78,  speed: 2.2, w: 58, h: 80, color: '#5a4a3a', accent: '#a8763a',
+    moves: ['spray', 'slam', 'lob'], minions: 'drum', minionGap: 240,
+    taunt: 'The PIPE FOREMAN opens every outfall at once!',
+    fact: 'Treated effluent must be tested before it can be released.' },
+
+  { n: 6, name: 'TOXIC BARON', title: 'Heavy Metals',
+    hp: 9,  gap: 70,  speed: 2.3, w: 58, h: 82, color: '#4a2a5a', accent: '#a83ac0',
+    moves: ['spray', 'summon', 'slam'], minions: 'spitter', minionGap: 220,
+    taunt: 'The TOXIC BARON floods the outfall with heavy metals!',
+    fact: 'Lead and mercury never break down - they build up in fish and people.' },
+
+  { n: 7, name: 'SMOG GENERAL', title: 'Air & Water Emissions',
+    hp: 10, gap: 62,  speed: 2.5, w: 60, h: 84, color: '#4a4a4a', accent: '#8a8a8a',
+    moves: ['lob', 'spray', 'summon', 'slam'], minions: 'chaser', minionGap: 200,
+    taunt: 'The SMOG GENERAL blots out the sun. Fight through it!',
+    fact: 'Acid rain from smokestacks acidifies lakes hundreds of miles away.' },
+
+  { n: 8, name: 'THE GREEDY TYCOON', title: 'He owns them all',
+    hp: 14, gap: 52,  speed: 2.7, w: 54, h: 96, color: '#2a2a3a', accent: '#c0392b',
+    moves: ['lob', 'spray', 'summon', 'slam', 'rage'], minions: 'chaser', minionGap: 170,
+    taunt: 'THE GREEDY TYCOON! He owns every polluter you have beaten. End this!',
+    fact: 'Holding owners accountable is how rivers actually get cleaned up.' },
+];
+
+function bossDef(n) {
+  return BOSSES[Math.max(0, Math.min(BOSSES.length - 1, n - 1))];
+}
 
 function levelDef(n) {
   return LEVELS[Math.max(0, Math.min(LEVELS.length - 1, n - 1))];
@@ -1481,17 +1544,18 @@ function triggerBlock(b) {
   else if (b.type === 'water') { score += 50; }
 }
 
-// ============ FINAL BOSS: THE GREEDY TYCOON ============
-// He walks, jumps, throws money-bags and toxic waste, and calls in drones.
-// Jerry has to dodge and land 6 bombs while staying alive.
+// ============ LEVEL BOSSES ============
+// Every level ends with the polluter behind it. One code path drives all
+// eight; BOSSES[] decides how hard each one hits.
 function startVillain() {
   gameState = 'villain';
-  levelReached = FINAL_LEVEL + 1;   // 9 = reached the final boss
+  const d = bossDef(level);
+  levelReached = Math.max(levelReached, level);
   jerry.x = 70; jerry.y = 300; jerry.vx = 0; jerry.vy = 0;
   jerry.invuln = 90;
   jerry.jumps = 0;
   levelBanner = 0;
-  // bombs are the only way to hurt him, so make sure Jerry has them
+  // bombs are the only way to hurt a boss, so make sure Jerry has them
   setStage(2);
   grantPower('bomb');
   camera.x = 0;
@@ -1501,15 +1565,20 @@ function startVillain() {
   particles = [];
 
   villain = {
-    x: 600, y: GROUND_Y - 96, w: 54, h: 96,
-    vx: -1.9, vy: 0, onGround: true,
-    hp: 12, maxHp: 12,   // tougher: by now Jerry has every power unlocked
-    hurt: 0,          // flash timer after taking a hit
-    attackTimer: 90,  // frames until next attack
-    phase: 1,         // gets more aggressive as hp drops
+    def: d,
+    name: d.name,
+    x: 600, y: GROUND_Y - d.h, w: d.w, h: d.h,
+    vx: -d.speed, vy: 0, onGround: true,
+    hp: d.hp, maxHp: d.hp,
+    hurt: 0,           // flash timer after taking a hit
+    attackTimer: 90,   // frames until the next attack
+    phase: 1,          // gets more aggressive as hp drops
     facing: -1,
+    minionTimer: d.minionGap || 0,
+    slam: 0,           // shockwave animation timer
+    rage: 0,           // final boss only: temporary frenzy
   };
-  showPopup('FINAL BOSS: The Greedy Tycoon! He fights back — dodge his attacks and land 6 water bombs!');
+  showPopup('BOSS: ' + d.taunt);
 }
 
 function updateVillain() {

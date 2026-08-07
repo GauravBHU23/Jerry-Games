@@ -5,7 +5,7 @@
 // would be worse than no leaderboard, so those go straight to the network and
 // simply fail when offline (the game already queues scores in that case).
 
-const VERSION = 'jerry-v1';
+const VERSION = 'jerry-v2';
 const SHELL = [
   './',
   './index.html',
@@ -42,6 +42,21 @@ self.addEventListener('fetch', event => {
   // Scores must always be live.
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(fetch(req));
+    return;
+  }
+
+  // Page loads: try the network first so a new deploy is picked up straight
+  // away, and fall back to the cached shell when offline.
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      fetch(req)
+        .then(res => {
+          const copy = res.clone();
+          caches.open(VERSION).then(c => c.put('./index.html', copy));
+          return res;
+        })
+        .catch(() => caches.match('./index.html').then(hit => hit || caches.match('./')))
+    );
     return;
   }
 

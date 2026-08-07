@@ -1,0 +1,9 @@
+node_modules/
+.server.log
+.vercel
+.env
+.env.local
+
+# local score data
+media/players.csv
+media/scores.csv

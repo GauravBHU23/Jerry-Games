@@ -1,9 +1,10 @@
 # Jerry the Water Saviour
 
 An educational platformer about water pollution and treatment.
-2 levels + 2 boss fights, playable on desktop and mobile.
+8 levels, a final boss and a shared leaderboard. Installable as an app,
+plays on desktop and mobile, and works offline.
 
-## How to run
+## How to run (local)
 
 You need [Node.js](https://nodejs.org) installed (any recent version).
 
@@ -28,6 +29,47 @@ http://192.168.1.5:3000
 ```
 
 Everyone on the same WiFi shares one leaderboard.
+
+## Deploying to Vercel
+
+Vercel's filesystem is read-only, so the CSV files cannot be used there. The
+API automatically switches to Postgres when a connection string is present —
+no code changes needed.
+
+**1. Create the database**
+
+In your Vercel project: **Storage → Create Database → Postgres** (the free
+Hobby tier is enough), then **Connect** it to the project. Vercel sets the
+`POSTGRES_URL` environment variable for you.
+
+> Any Postgres works — Neon, Supabase, Railway. Just add `POSTGRES_URL`
+> yourself under Settings → Environment Variables.
+
+**2. Deploy**
+
+```
+vercel --prod
+```
+or push to GitHub and import the repo in Vercel.
+
+**3. Done**
+
+The `players` and `scores` tables are created automatically on the first
+request. Nothing else to configure.
+
+### If the API returns 404 on Vercel
+
+That means the deployment was made *before* the `api/` folder existed —
+redeploy. Each file in `api/` becomes its own serverless function:
+`api/player.js`, `api/score.js`, `api/leaderboard.js`.
+
+### Local vs Vercel
+
+| | Local (`node server.js`) | Vercel |
+|---|---|---|
+| Storage | CSV files in `media/` | Postgres |
+| API | one Node server | serverless functions in `api/` |
+| Switch | automatic — set `POSTGRES_URL` to use Postgres locally too |
 
 ## Install as an app (PWA)
 
@@ -55,8 +97,8 @@ rank**, whatever the data looks like. Your run time is shown live in the HUD.
 
 ## Where the data lives
 
-All scores are plain CSV files in the `media/` folder, so you can open
-them in Excel:
+Running locally, all scores are plain CSV files in the `media/` folder, so you
+can open them in Excel. (On Vercel the same data lives in Postgres instead.)
 
 | File | Contents |
 |---|---|
@@ -78,10 +120,10 @@ The game talks to these endpoints; you can also call them yourself.
 
 | Method | Route | Purpose |
 |---|---|---|
-| `GET`  | `/api/player/:id`  | That player's profile + their past games |
-| `GET`  | `/api/leaderboard` | Best score per player, ranked |
-| `POST` | `/api/player`      | `{ name }` → creates a player, returns the new id |
-| `POST` | `/api/score`       | `{ id, score, level }` → records one game |
+| `GET`  | `/api/player?id=usr_x` | That player's profile + their past games |
+| `GET`  | `/api/leaderboard`     | Best score per player, ranked |
+| `POST` | `/api/player`          | `{ name }` → creates a player, returns the new id |
+| `POST` | `/api/score`           | `{ id, score, level, durationMs }` → records one game |
 
 Example:
 

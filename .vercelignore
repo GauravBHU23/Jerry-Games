@@ -1,0 +1,5 @@
+# Local-only CSV data — on Vercel the leaderboard lives in Postgres.
+# Without this the raw player data would be served as static files.
+media/*.csv
+node_modules
+.server.log
