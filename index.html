@@ -187,7 +187,8 @@
     height: auto;
     border: 3px solid #4af;
     box-shadow: 0 0 40px rgba(74, 175, 255, 0.6);
-    image-rendering: pixelated;
+    /* no image-rendering:pixelated - the canvas now renders at the device's
+       own resolution, so letting the browser do nothing keeps text crisp */
     background: #6bd6ff;
     touch-action: none;
   }
@@ -300,7 +301,9 @@
 // ============ SETUP ============
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const W = canvas.width, H = canvas.height;
+// The game always thinks in this coordinate space. The canvas backing store is
+// resized to the real device resolution in fitCanvas(), which keeps text sharp.
+const W = 800, H = 500;
 
 // Input
 const keys = {};
@@ -334,7 +337,22 @@ function fitCanvas() {
   const availW = window.innerWidth - 12;
   const availH = window.innerHeight - chrome - reserved;
   const scale = Math.max(0.2, Math.min(availW / W, availH / H));
-  stage.style.width = Math.floor(W * scale) + 'px';
+  const cssW = Math.floor(W * scale);
+  stage.style.width = cssW + 'px';
+
+  // Render at the real device resolution instead of stretching an 800x500
+  // bitmap, which is what made all the text look soft. The game keeps drawing
+  // in 800x500 coordinates; the transform below does the scaling.
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  const pxW = Math.round(cssW * dpr);
+  const pxH = Math.round(cssW * (H / W) * dpr);
+  if (canvas.width !== pxW || canvas.height !== pxH) {
+    canvas.width = pxW;
+    canvas.height = pxH;
+  }
+  // one unit of game space -> however many real pixels that is now
+  ctx.setTransform(pxW / W, 0, 0, pxH / H, 0, 0);
+  ctx.imageSmoothingEnabled = true;
 }
 window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 150));
