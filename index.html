@@ -1034,12 +1034,11 @@ function drawHUD() {
     ctx.fillText('[X] BOMB', 660, 23);
   }
   if (gameState === 'boss') {
-    ctx.fillStyle = '#f44';
-    ctx.font = 'bold 12px monospace';
-    ctx.fillText('BOSS: Stop the polluter!', 15, 480);
+    // keep boss status on the HUD strip, not at the bottom edge where it hides
     const alive = boss.stacks.filter(s => s.alive).length;
-    ctx.fillStyle = '#fff';
-    ctx.fillText('STACKS LEFT: ' + alive + '/3', 250, 480);
+    ctx.fillStyle = '#f44';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText('BOSS  STACKS LEFT: ' + alive + '/3', 15, 55);
   }
 }
 
@@ -1053,31 +1052,59 @@ function drawMiniDroplet(x, y) {
 }
 
 function drawPopup() {
-  ctx.fillStyle = 'rgba(0,10,25,0.9)';
-  ctx.fillRect(40, H - 130, W - 80, 80);
+  // Sits just under the HUD at the top: on a phone the bottom of the screen is
+  // where the thumbs and the ground are, so text down there gets missed.
+  const pad = 18, lh = 24;
+  const boxX = 30, boxW = W - 60;
+  const textW = boxW - pad * 2;
+
+  ctx.font = 'bold 18px monospace';
+  const lines = wrapLines(popup.text, textW);
+  const boxH = pad + 22 + lines.length * lh + pad - 8;
+  // clear the HUD, and the extra boss status line when it is showing
+  const boxY = gameState === 'boss' ? 66 : 46;
+
+  // drop shadow so the panel separates from the sky behind it
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(boxX + 4, boxY + 4, boxW, boxH);
+
+  ctx.fillStyle = 'rgba(0,12,28,0.95)';
+  ctx.fillRect(boxX, boxY, boxW, boxH);
   ctx.strokeStyle = '#4af';
   ctx.lineWidth = 3;
-  ctx.strokeRect(40, H - 130, W - 80, 80);
+  ctx.strokeRect(boxX, boxY, boxW, boxH);
+
   ctx.fillStyle = '#4af';
-  ctx.font = 'bold 13px monospace';
-  ctx.fillText('◆ DID YOU KNOW?', 55, H - 108);
+  ctx.font = 'bold 15px monospace';
+  ctx.fillText('◆ DID YOU KNOW?', boxX + pad, boxY + pad + 6);
+
   ctx.fillStyle = '#fff';
-  ctx.font = '14px monospace';
-  wrapText(popup.text, 55, H - 85, W - 110, 20);
+  ctx.font = 'bold 18px monospace';
+  lines.forEach((l, i) => {
+    ctx.fillText(l, boxX + pad, boxY + pad + 30 + i * lh);
+  });
 }
 
-function wrapText(text, x, y, maxW, lh) {
+// Splits text into lines that fit maxW. Call with the final font already set.
+function wrapLines(text, maxW) {
   const words = text.split(' ');
+  const lines = [];
   let line = '';
   for (const w of words) {
     const test = line + w + ' ';
     if (ctx.measureText(test).width > maxW && line !== '') {
-      ctx.fillText(line, x, y);
+      lines.push(line.trim());
       line = w + ' ';
-      y += lh;
     } else line = test;
   }
-  ctx.fillText(line, x, y);
+  if (line.trim()) lines.push(line.trim());
+  return lines;
+}
+
+function wrapText(text, x, y, maxW, lh) {
+  const lines = wrapLines(text, maxW);
+  lines.forEach((l, i) => ctx.fillText(l, x, y + i * lh));
+  return lines.length * lh;
 }
 
 function drawMenu() {
