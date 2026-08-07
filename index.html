@@ -610,6 +610,7 @@ const profile = {
 const leaderboard = { rows: [], status: 'idle' };  // idle|loading|ok|offline
 
 const ID_KEY = 'jerry-player-id';
+const NAME_KEY = 'jerry-player-name';
 const PENDING_KEY = 'jerry-pending-scores';
 
 const store = {
@@ -644,9 +645,20 @@ async function loadSavedPlayer() {
     const p = await apiJson(`${API}/player?id=${encodeURIComponent(id)}`);
     applyProfile(p);
     profile.returning = true;
+    store.set(NAME_KEY, p.name);
     flushPendingScores();
     return true;
   } catch (e) {
+    // No server: fall back to whatever this browser remembers.
+    const savedName = store.get(NAME_KEY);
+    if (savedName) {
+      profile.id = id;
+      profile.name = savedName;
+      playerName = savedName;
+      profile.returning = true;
+      applyLocalStats();
+      return true;
+    }
     return false;
   }
 }
@@ -664,13 +676,34 @@ async function registerPlayer(name) {
     profile.returning = false;
     return true;
   } catch (e) {
-    // offline: still let them play under this name
+    // No server (static hosting or it is down): keep playing locally, and
+    // remember the name so a reload still recognises them.
     profile.id = store.get(ID_KEY) || 'local_' + Math.random().toString(36).slice(2, 10);
     store.set(ID_KEY, profile.id);
+    store.set(NAME_KEY, clean);
     profile.name = clean;
     playerName = clean;
+    profile.returning = false;
+    applyLocalStats();
     return false;
   }
+}
+
+// Rebuilds profile numbers from the runs saved in this browser.
+function applyLocalStats() {
+  const mine = loadLocalRuns().filter(r => r.name === profile.name);
+  profile.gamesPlayed = mine.length;
+  profile.bestScore = mine.reduce((m, r) => Math.max(m, r.score), 0);
+  profile.bestLevel = mine.reduce((m, r) => Math.max(m, r.level), 1);
+  profile.history = mine
+    .slice()
+    .sort((a, b) => new Date(b.playedAt) - new Date(a.playedAt))
+    .slice(0, 20);
+  const board = localBoard();
+  const entry = board.find(r => r.name === profile.name);
+  profile.rank = entry ? entry.rank : null;
+  profile.totalPlayers = board.length;
+  profile.bestTimeMs = entry ? entry.durationMs : 0;
 }
 
 // Scores recorded while the server was down, retried later.
@@ -700,14 +733,19 @@ async function flushPendingScores() {
 }
 
 async function submitScore(score, level, durationMs) {
-  const entry = { score, level, durationMs };
+  const playedAt = new Date().toISOString();
+  const entry = { score, level, durationMs, playedAt };
   // optimistic local update so the end screen is correct straight away
   profile.gamesPlayed++;
   if (score > profile.bestScore) profile.bestScore = score;
   if (level > profile.bestLevel) profile.bestLevel = level;
-  profile.history.unshift({ score, level, durationMs, playedAt: new Date().toISOString() });
+  profile.history.unshift({ score, level, durationMs, playedAt });
 
-  if (!profile.id) return;
+  // always keep a copy in this browser, so the board works with no server
+  saveLocalRun({ id: profile.id || 'local', name: profile.name || 'PLAYER',
+                 score, level, durationMs, playedAt });
+
+  if (!profile.id) { fetchLeaderboard(); return; }
   try {
     const p = await apiJson(`${API}/score`, {
       method: 'POST',
@@ -717,6 +755,12 @@ async function submitScore(score, level, durationMs) {
     applyProfile(p);
   } catch (e) {
     queuePending(entry);
+    // offline: work out our own rank from the local runs
+    const board = localBoard();
+    const mine = board.find(r => r.name === profile.name);
+    profile.rank = mine ? mine.rank : null;
+    profile.totalPlayers = board.length;
+    profile.bestTimeMs = mine ? mine.durationMs : 0;
   }
   fetchLeaderboard();
 }
@@ -728,8 +772,50 @@ async function fetchLeaderboard() {
     leaderboard.rows = d.rows || [];
     leaderboard.status = 'ok';
   } catch (e) {
+    // No API (static hosting, or the server is down). Show this device's own
+    // runs so the board is never just an empty screen.
+    leaderboard.rows = localBoard();
     leaderboard.status = 'offline';
   }
+}
+
+// Builds a board out of the runs stored in this browser, ranked with the same
+// rules the server uses.
+function localBoard() {
+  const runs = loadLocalRuns();
+  const best = new Map();
+  for (const r of runs) {
+    const cur = best.get(r.name);
+    if (!cur || compareRunsClient(r, cur) < 0) best.set(r.name, r);
+  }
+  const rows = [...best.values()].sort(compareRunsClient);
+  rows.forEach((r, i) => { r.rank = i + 1; });
+  return rows;
+}
+
+function compareRunsClient(a, b) {
+  if (b.score !== a.score) return b.score - a.score;
+  const ad = a.durationMs || Infinity, bd = b.durationMs || Infinity;
+  if (ad !== bd) return ad - bd;
+  const at = new Date(a.playedAt).getTime() || 0;
+  const bt = new Date(b.playedAt).getTime() || 0;
+  if (at !== bt) return at - bt;
+  return String(a.id || '').localeCompare(String(b.id || ''));
+}
+
+const LOCAL_RUNS_KEY = 'jerry-local-runs';
+
+function loadLocalRuns() {
+  try { return JSON.parse(store.get(LOCAL_RUNS_KEY) || '[]'); }
+  catch (e) { return []; }
+}
+
+function saveLocalRun(entry) {
+  const runs = loadLocalRuns();
+  runs.push(entry);
+  // keep the file small; only the best 100 matter for a board
+  runs.sort(compareRunsClient);
+  store.set(LOCAL_RUNS_KEY, JSON.stringify(runs.slice(0, 100)));
 }
 
 // ============ PWA ============
@@ -3003,14 +3089,15 @@ function drawLeaderboard() {
     ctx.fillStyle = '#8bc';
     ctx.font = '13px monospace';
     ctx.fillText(leaderboard.status === 'offline'
-      ? 'Server offline - scores saved on this device.'
+      ? 'No scores on this device yet. Play a game!'
       : 'No scores yet. Be the first!', 56, 178);
   }
 
   const MEDAL = ['#ffd94a', '#d8d8d8', '#cd8b4a'];
   rows.forEach((r, i) => {
     const y = 168 + i * 24;
-    const me = r.id === profile.id;
+    // offline rows are grouped by name, so match on either
+    const me = r.id === profile.id || (!!profile.name && r.name === profile.name);
     if (me) {
       ctx.fillStyle = 'rgba(74,175,255,0.20)';
       ctx.fillRect(50, y - 13, tableR - 50, 21);
@@ -3063,7 +3150,7 @@ function drawLeaderboard() {
   ctx.fillStyle = leaderboard.status === 'offline' ? '#f88' : '#5b7';
   ctx.font = '10px monospace';
   ctx.fillText(leaderboard.status === 'offline'
-    ? 'offline - run  node server.js  to share scores'
+    ? 'this device only - no leaderboard server reachable'
     : 'synced with media/scores.csv', W / 2, H - 32);
 
   ctx.fillStyle = '#0f0';
