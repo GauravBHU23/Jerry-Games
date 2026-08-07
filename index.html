@@ -127,6 +127,29 @@
   #nameGo:hover { background: #6cf; }
   #nameGo:active { transform: scale(0.97); }
   #nameHint { margin-top: 9px; color: #567; font-size: 10px; }
+  #nameHint.error { color: #ff8080; font-weight: bold; }
+  #nameInput.invalid { border-color: #d05a5a; box-shadow: 0 0 10px rgba(208,90,90,0.45); }
+  #nameGo:disabled {
+    background: #35505f; color: #7d96a3; cursor: not-allowed; box-shadow: none;
+  }
+  #nameOverlay .panel { position: relative; }
+  #nameClose {
+    position: absolute;
+    top: 8px; right: 8px;
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1;
+    color: #8bc;
+    background: rgba(10, 30, 55, 0.9);
+    border: 1px solid #2a6fa8;
+    border-radius: 50%;
+    cursor: pointer;
+    padding: 0;
+  }
+  #nameClose:hover { color: #fff; border-color: #4af; background: rgba(74,175,255,0.25); }
+  #nameClose:active { transform: scale(0.92); }
 
   /* lets a second person on the same device claim their own id */
   #switchPlayer {
@@ -277,9 +300,10 @@
 
   <div id="nameOverlay">
     <div class="panel">
+      <button id="nameClose" type="button" aria-label="Close" title="Close">✕</button>
       <h2>◆ ENTER YOUR NAME ◆</h2>
       <p>Your score will appear on the leaderboard</p>
-      <input id="nameInput" type="text" maxlength="12" placeholder="PLAYER"
+      <input id="nameInput" type="text" maxlength="12" placeholder="YOUR NAME" required
              autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
       <button id="nameGo">START GAME</button>
       <div id="nameHint">Max 12 characters</div>
@@ -948,7 +972,12 @@ window.addEventListener('offline', () => toast('Offline - scores will sync later
 const nameOverlay = document.getElementById('nameOverlay');
 const nameInput = document.getElementById('nameInput');
 const nameGo = document.getElementById('nameGo');
+const nameHint = document.getElementById('nameHint');
+const nameClose = document.getElementById('nameClose');
 let askingName = false;
+
+nameClose.addEventListener('click', e => { e.stopPropagation(); cancelName(); });
+nameClose.addEventListener('pointerdown', e => e.stopPropagation());
 
 // keep taps inside the dialog away from the canvas' tap-to-start
 nameOverlay.addEventListener('pointerdown', e => e.stopPropagation());
@@ -957,6 +986,10 @@ function askName() {
   askingName = true;
   nameOverlay.classList.add('show');
   nameInput.value = profile.name || '';
+  showNameError('');
+  refreshNameState();
+  // the close button is only useful when there is something to go back to
+  nameClose.style.display = profile.id ? 'flex' : 'none';
   // focusing immediately can be ignored on mobile, so defer a frame
   setTimeout(() => { nameInput.focus(); nameInput.select(); }, 50);
 }
@@ -967,8 +1000,46 @@ function closeNameOverlay() {
   nameInput.blur();
 }
 
+// Backing out of the dialog. Only possible when a player already exists -
+// a first-time visitor has to enter a name to play.
+function cancelName() {
+  if (!profile.id) return;
+  showNameError('');
+  closeNameOverlay();
+}
+
+// A name is required - it is what shows on the shared leaderboard, so an
+// empty one would put anonymous rows there.
+function nameError(raw) {
+  const v = raw.trim();
+  if (!v) return 'Please enter your name';
+  if (v.length < 2) return 'Name must be at least 2 characters';
+  if (!/[a-z0-9]/i.test(v)) return 'Name needs at least one letter or number';
+  return '';
+}
+
+function showNameError(msg) {
+  nameHint.textContent = msg || 'Max 12 characters';
+  nameHint.classList.toggle('error', !!msg);
+  nameInput.classList.toggle('invalid', !!msg);
+}
+
+// Live feedback: enable the button only once the name is usable.
+function refreshNameState() {
+  const bad = nameError(nameInput.value);
+  nameGo.disabled = !!bad;
+  if (!bad) showNameError('');
+}
+
 async function confirmName() {
-  const v = nameInput.value.trim().toUpperCase().slice(0, 12) || 'PLAYER';
+  const raw = nameInput.value;
+  const bad = nameError(raw);
+  if (bad) {
+    showNameError(bad);
+    nameInput.focus();
+    return;                       // stop - no anonymous runs
+  }
+  const v = raw.trim().toUpperCase().slice(0, 12);
   nameGo.disabled = true;
   nameGo.textContent = 'SAVING...';
   await registerPlayer(v);
@@ -981,9 +1052,11 @@ async function confirmName() {
 }
 
 nameGo.addEventListener('click', e => { e.stopPropagation(); confirmName(); });
+nameInput.addEventListener('input', refreshNameState);
 nameInput.addEventListener('keydown', e => {
   e.stopPropagation();            // do not drive the game while typing
   if (e.key === 'Enter') confirmName();
+  if (e.key === 'Escape') cancelName();
 });
 nameInput.addEventListener('keyup', e => e.stopPropagation());
 

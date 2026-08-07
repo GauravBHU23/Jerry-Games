@@ -5,7 +5,7 @@
 // would be worse than no leaderboard, so those go straight to the network and
 // simply fail when offline (the game already queues scores in that case).
 
-const VERSION = 'jerry-v8';
+const VERSION = 'jerry-v9';
 const SHELL = [
   './',
   './index.html',
