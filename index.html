@@ -2,24 +2,41 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#001830">
 <title>Jerry the Water Saviour</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overscroll-behavior: none; }
   body {
     background: linear-gradient(#000, #001830);
-    min-height: 100vh;
     display: flex; flex-direction: column;
     justify-content: center; align-items: center;
     font-family: 'Courier New', monospace;
     color: #fff;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    padding: 6px;
   }
-  h1 { color: #4af; margin-bottom: 6px; font-size: 14px; letter-spacing: 2px; }
+  h1 { color: #4af; margin-bottom: 6px; font-size: 14px; letter-spacing: 2px; text-align: center; }
+  #stage {
+    position: relative;
+    line-height: 0;
+    max-width: 100%;
+  }
   #game {
     display: block;
+    width: 100%;
+    height: auto;
     border: 3px solid #4af;
     box-shadow: 0 0 40px rgba(74, 175, 255, 0.6);
     image-rendering: pixelated;
     background: #6bd6ff;
+    touch-action: none;
   }
   #info {
     margin-top: 10px;
@@ -36,16 +53,77 @@
     color: #4af;
     font-size: 11px;
   }
+
+  /* ===== Touch controls (mobile / tablet) ===== */
+  #touch {
+    display: none;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    padding: 10px max(10px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-bottom));
+    justify-content: space-between;
+    align-items: flex-end;
+    pointer-events: none;
+    z-index: 10;
+  }
+  body.touch-mode #touch { display: flex; }
+  body.touch-mode #info { display: none; }
+  /* keep the play area vertically centred in the space above the buttons */
+  body.touch-mode { justify-content: center; padding-bottom: 110px; }
+  @media (orientation: landscape) and (max-height: 500px) {
+    body.touch-mode { padding-bottom: 0; }
+  }
+
+  .pad { display: flex; gap: 12px; pointer-events: auto; }
+  .btn {
+    width: 68px; height: 68px;
+    border-radius: 50%;
+    background: rgba(20, 45, 75, 0.55);
+    border: 2px solid rgba(74, 175, 255, 0.85);
+    color: #cfe9ff;
+    font-family: inherit;
+    font-size: 24px; font-weight: bold;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    touch-action: none;
+    transition: transform .06s, background .06s;
+  }
+  .btn.small { width: 58px; height: 58px; font-size: 16px; }
+  .btn.jump { background: rgba(20, 90, 60, 0.55); border-color: rgba(80, 230, 160, 0.9); color: #d6ffe9; }
+  .btn.bomb { background: rgba(15, 60, 110, 0.6); border-color: rgba(120, 200, 255, 0.95); color: #eaf6ff; }
+  .btn.active { transform: scale(0.9); background: rgba(74, 175, 255, 0.65); color: #fff; }
+
+  @media (max-width: 900px) {
+    h1 { font-size: 12px; }
+  }
+  @media (orientation: landscape) and (max-height: 500px) {
+    h1 { display: none; }
+    .btn { width: 56px; height: 56px; font-size: 20px; }
+    .btn.small { width: 50px; height: 50px; font-size: 14px; }
+  }
 </style>
 </head>
 <body>
 <h1>◆ JERRY THE WATER SAVIOUR ◆</h1>
-<canvas id="game" width="800" height="500"></canvas>
+<div id="stage">
+  <canvas id="game" width="800" height="500"></canvas>
+</div>
 <div id="info">
   <kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd> to move &nbsp;•&nbsp;
   <kbd>SPACE</kbd> / <kbd>W</kbd> / <kbd>↑</kbd> to jump &nbsp;•&nbsp;
   <kbd>X</kbd> to throw water bomb &nbsp;•&nbsp;
   <kbd>R</kbd> to restart
+</div>
+
+<div id="touch">
+  <div class="pad">
+    <div class="btn" data-key="arrowleft">◀</div>
+    <div class="btn" data-key="arrowright">▶</div>
+  </div>
+  <div class="pad">
+    <div class="btn small bomb" data-key="x">BOMB</div>
+    <div class="btn jump" data-key=" ">▲</div>
+  </div>
 </div>
 
 <script>
@@ -61,6 +139,69 @@ window.addEventListener('keydown', e => {
   if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(e.key.toLowerCase())) e.preventDefault();
 });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+// ============ TOUCH / RESPONSIVE ============
+// maxTouchPoints alone is unreliable (desktop Chrome reports 10), so require a
+// coarse/hoverless pointer — that is what actually separates phones from mice.
+const isTouch = matchMedia('(pointer: coarse)').matches ||
+                matchMedia('(hover: none)').matches;
+if (isTouch) document.body.classList.add('touch-mode');
+
+// Scale the canvas to fit the viewport while keeping the 800x500 aspect ratio.
+// The game keeps drawing in 800x500 space; CSS just stretches the result.
+function fitCanvas() {
+  const stage = document.getElementById('stage');
+  const title = document.querySelector('h1');
+  const info = document.getElementById('info');
+  const chrome = (title && title.offsetParent ? title.offsetHeight + 6 : 0) +
+                 (info && info.offsetParent ? info.offsetHeight + 10 : 0);
+  // In portrait the buttons sit below the game, so reserve their height.
+  // In landscape they float over the empty side areas, so reserve nothing.
+  const landscape = window.innerWidth > window.innerHeight;
+  // Landscape buttons float over the sides, but still keep a small margin so
+  // they never sit on top of the HUD/action area at the bottom of the canvas.
+  const reserved = isTouch ? (landscape ? 30 : 110) : 24;
+  const availW = window.innerWidth - 12;
+  const availH = window.innerHeight - chrome - reserved;
+  const scale = Math.max(0.2, Math.min(availW / W, availH / H));
+  stage.style.width = Math.floor(W * scale) + 'px';
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 150));
+fitCanvas();
+
+// On-screen buttons drive the same `keys` map the keyboard uses.
+document.querySelectorAll('#touch .btn').forEach(btn => {
+  const key = btn.dataset.key;
+  const press = e => {
+    e.preventDefault();
+    keys[key] = true;
+    btn.classList.add('active');
+  };
+  const release = e => {
+    e.preventDefault();
+    keys[key] = false;
+    btn.classList.remove('active');
+  };
+  btn.addEventListener('touchstart', press, { passive: false });
+  btn.addEventListener('touchend', release, { passive: false });
+  btn.addEventListener('touchcancel', release, { passive: false });
+  btn.addEventListener('mousedown', press);
+  btn.addEventListener('mouseup', release);
+  btn.addEventListener('mouseleave', release);
+});
+
+// Tap the canvas to start / restart on menu, game over and win screens.
+// A tap can begin and end inside a single frame, so latch it and let the
+// game loop consume the flag instead of sampling a key that is already up.
+let tapConfirm = false;
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  tapConfirm = true;
+});
+// Block double-tap zoom / long-press menus over the play area.
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('gesturestart', e => e.preventDefault());
 
 // ============ CONSTANTS ============
 const GRAVITY = 0.55;
@@ -978,6 +1119,13 @@ function drawMenu() {
   ctx.fillStyle = '#c8e8ff';
   ctx.fillText('~ An educational quest to save our rivers ~', W/2, 158);
 
+  // nudge phone players towards landscape, where the view is much bigger
+  if (isTouch && window.innerHeight > window.innerWidth) {
+    ctx.fillStyle = '#ff8';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText('↻ Rotate your phone sideways for a bigger view', W/2, 178);
+  }
+
   // preview jerry
   const jbob = Math.sin(Date.now() * 0.005) * 6;
   const px = W/2 - 20, py = 190 + jbob;
@@ -1036,7 +1184,7 @@ function drawMenu() {
   ctx.fillStyle = '#0f0';
   ctx.font = 'bold 18px monospace';
   if (Math.floor(Date.now() / 500) % 2) {
-    ctx.fillText('▶ PRESS ENTER TO START ◀', W/2, 460);
+    ctx.fillText(isTouch ? '▶ TAP HERE TO START ◀' : '▶ PRESS ENTER TO START ◀', W/2, 460);
   }
   ctx.textAlign = 'left';
 }
@@ -1057,7 +1205,7 @@ function drawGameOver() {
   ctx.fillStyle = '#0f0';
   ctx.font = 'bold 16px monospace';
   if (Math.floor(Date.now() / 500) % 2) {
-    ctx.fillText('▶ PRESS R TO TRY AGAIN ◀', W/2, H/2 + 90);
+    ctx.fillText(isTouch ? '▶ TAP TO TRY AGAIN ◀' : '▶ PRESS R TO TRY AGAIN ◀', W/2, H/2 + 90);
   }
   ctx.textAlign = 'left';
 }
@@ -1124,7 +1272,7 @@ function drawWin() {
   ctx.fillStyle = '#0f0';
   ctx.font = 'bold 15px monospace';
   if (Math.floor(Date.now() / 500) % 2) {
-    ctx.fillText('▶ PRESS R TO PLAY AGAIN ◀', W/2, 445);
+    ctx.fillText(isTouch ? '▶ TAP TO PLAY AGAIN ◀' : '▶ PRESS R TO PLAY AGAIN ◀', W/2, 445);
   }
   ctx.textAlign = 'left';
 }
@@ -1169,9 +1317,13 @@ function draw() {
 }
 
 function loop() {
+  // consume a pending screen tap once per frame
+  const tapped = tapConfirm;
+  tapConfirm = false;
+
   if (gameState === 'menu') {
     drawMenu();
-    if (keys['enter']) {
+    if (keys['enter'] || tapped) {
       fullReset();
       gameState = 'playing';
     }
@@ -1184,10 +1336,10 @@ function loop() {
   } else if (gameState === 'gameover') {
     draw();
     drawGameOver();
-    if (keys['r']) { gameState = 'menu'; }
+    if (keys['r'] || tapped) { gameState = 'menu'; }
   } else if (gameState === 'win') {
     drawWin();
-    if (keys['r']) { gameState = 'menu'; }
+    if (keys['r'] || tapped) { gameState = 'menu'; }
   }
   requestAnimationFrame(loop);
 }
