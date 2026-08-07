@@ -29,7 +29,7 @@ module.exports = async (req, res) => {
     const player = await backend.getPlayer(body.id);
     if (!player) return res.status(404).json({ error: 'player not found' });
 
-    await backend.addScore(player.id, player.name, body.score, body.level, body.durationMs);
+    await backend.addScore(player.id, player.name, body.score, body.level, body.durationMs, body.mode);
     await backend.touchPlayer(player.id);
     res.status(201).json(await playerProfile(player.id));
   } catch (e) {

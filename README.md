@@ -143,6 +143,30 @@ curl http://localhost:3000/api/leaderboard
 | Restart | `R` | tap the screen |
 | Mute | `M` | 🔊 button |
 
+### The menu
+
+`↑` `↓` to move, `ENTER` to pick, or just tap a row:
+
+| Row | |
+|---|---|
+| **Start game** | begins at level 1 |
+| **Level select** | appears once you have cleared a level; replay any unlocked one, with the powers you would have earned by then |
+| **Difficulty** | Easy / Normal / Hard — `←` `→` to change |
+| **Volume** | off / 25 / 50 / 75 / 100% |
+| **How to play** | four pages: controls, rules, scoring, powers |
+| **Leaderboard** | |
+
+Difficulty changes your starting lives and how fast enemies move, and is
+recorded with each score so runs can be compared fairly:
+
+| | Lives | Enemy speed |
+|---|---|---|
+| Easy | 5 | 0.85× |
+| Normal | 3 | 1.0× |
+| Hard | 2 | 1.25× |
+
+Your unlocked levels, difficulty and volume are all remembered between visits.
+
 ### Getting around
 
 `ESC` is the universal back key: it pauses a run, and steps back one screen

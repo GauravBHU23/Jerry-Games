@@ -123,7 +123,7 @@ const server = http.createServer(async (req, res) => {
       if (!body.id) return sendJson(res, 400, { error: 'id required' });
       const player = await backend.getPlayer(body.id);
       if (!player) return sendJson(res, 404, { error: 'player not found' });
-      await backend.addScore(player.id, player.name, body.score, body.level, body.durationMs);
+      await backend.addScore(player.id, player.name, body.score, body.level, body.durationMs, body.mode);
       await backend.touchPlayer(player.id);
       return sendJson(res, 201, await playerProfile(player.id));
     }
