@@ -3615,9 +3615,10 @@ function drawMenu() {
     ctx.fillText('↻ Rotate your phone sideways for a bigger view', W/2, 178);
   }
 
-  // preview jerry
+  // preview jerry - skipped when the menu block needs the space
   const jbob = Math.sin(Date.now() * 0.005) * 6;
   const px = W/2 - 20, py = 190 + jbob;
+  if (menuLayout().showMascot) {
   ctx.save();
   ctx.fillStyle = '#4a9fff';
   ctx.beginPath();
@@ -3649,20 +3650,24 @@ function drawMenu() {
   ctx.arc(px + 20, py + 38, 5, 0.2, Math.PI - 0.2);
   ctx.stroke();
   ctx.restore();
+  }
 
   // ---- menu rows ----
   // A real menu instead of a single "press enter": start, level select,
   // difficulty and help, driven by arrows/tap like the pause menu.
   const rows = menuRows();
-  const top = 268;
+  // The row count changes once level select unlocks, so the block is measured
+  // and placed to fit rather than starting at a fixed y.
+  const L = menuLayout();
+  const top = L.top;
   rows.forEach((row, i) => {
-    const y = top + i * 40;
+    const y = top + i * L.step;
     const on = i === menuSel;
     ctx.fillStyle = on ? 'rgba(74,175,255,0.24)' : 'rgba(0,20,40,0.55)';
-    ctx.fillRect(W/2 - 170, y - 22, 340, 32);
+    ctx.fillRect(W/2 - 170, y - L.rowH + 10, 340, L.rowH);
     ctx.strokeStyle = on ? '#4af' : 'rgba(120,150,180,0.35)';
     ctx.lineWidth = on ? 2 : 1;
-    ctx.strokeRect(W/2 - 170, y - 22, 340, 32);
+    ctx.strokeRect(W/2 - 170, y - L.rowH + 10, 340, L.rowH);
     ctx.fillStyle = on ? '#fff' : '#9fbdd6';
     ctx.font = (on ? 'bold ' : '') + '14px monospace';
     ctx.fillText(row.label, W/2, y);
@@ -3670,7 +3675,7 @@ function drawMenu() {
 
   // Returning player card, below the menu
   if (profile.id && profile.name) {
-    const cardY = top + rows.length * 40 + 6, cardH = 40;
+    const cardY = L.cardY, cardH = L.cardH;
     ctx.fillStyle = 'rgba(0,10,26,0.55)';
     ctx.fillRect(170, cardY, W - 340, cardH);
     ctx.strokeStyle = 'rgba(255,217,74,0.55)';
@@ -4062,6 +4067,34 @@ function menuRows() {
   return rows;
 }
 
+// Where the menu block sits. Everything below the title has to fit above the
+// hint line, and the row count varies, so the numbers are derived rather than
+// hard-coded - otherwise unlocking level select pushes the card off-screen.
+function menuLayout() {
+  const rows = menuRows().length;
+  const hasCard = !!(profile.id && profile.name);
+  const bottom = H - 26;                 // leave room for the hint line
+  const cardH = hasCard ? 40 : 0;
+  const gap = hasCard ? 8 : 0;
+
+  // shrink the rows as the list grows so the mascot keeps its space
+  const step = rows >= 6 ? 34 : rows >= 5 ? 36 : 40;
+  const rowH = step - 8;
+
+  const blockH = rows * step + gap + cardH;
+  // start below the mascot, but slide up if the block would overflow
+  let top = Math.min(268, bottom - blockH + step - 10);
+  top = Math.max(232, top);              // never ride up over the subtitle
+
+  // The mascot occupies roughly 190-246; only draw it when the first row
+  // starts clear of that, rather than letting the two overlap.
+  const showMascot = (top - rowH + 10) >= 248;
+
+  return { top, step, rowH, gap, cardH, showMascot,
+           cardY: top + (rows - 1) * step + 10 + gap,
+           bottom };
+}
+
 function chooseMenuItem() {
   const rows = menuRows();
   const row = rows[Math.min(menuSel, rows.length - 1)];
@@ -4266,10 +4299,11 @@ canvas.addEventListener('pointerdown', e => {
   }
 
   if (gameState === 'menu') {
-    const rows = menuRows();
-    const hit = rows.findIndex((_, i) => {
-      const y = 268 + i * 40;
-      return gx > W / 2 - 170 && gx < W / 2 + 170 && gy > y - 22 && gy < y + 10;
+    const L = menuLayout();
+    const hit = menuRows().findIndex((_, i) => {
+      const y = L.top + i * L.step;
+      return gx > W / 2 - 170 && gx < W / 2 + 170 &&
+             gy > y - L.rowH + 10 && gy < y + 10;
     });
     if (hit >= 0) { menuSel = hit; chooseMenuItem(); }
     return;
