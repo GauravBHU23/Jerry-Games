@@ -751,6 +751,7 @@ const profile = {
   bestScore: 0,
   bestLevel: 1,
   bestTimeMs: 0,
+  totalTimeMs: 0,        // every run added up, shown on the board
   rank: null,
   totalPlayers: 0,
   history: [],
@@ -788,6 +789,7 @@ function applyProfile(p) {
   profile.bestScore = p.bestScore || 0;
   profile.bestLevel = p.bestLevel || 1;
   profile.bestTimeMs = p.bestTimeMs || 0;
+  profile.totalTimeMs = p.totalTimeMs || 0;
   profile.rank = p.rank == null ? null : p.rank;
   profile.totalPlayers = p.totalPlayers || 0;
   profile.history = p.history || [];
@@ -880,6 +882,7 @@ function applyLocalStats() {
   profile.rank = entry ? entry.rank : null;
   profile.totalPlayers = board.length;
   profile.bestTimeMs = entry ? entry.durationMs : 0;
+  profile.totalTimeMs = mine.reduce((s, r) => s + (r.durationMs || 0), 0);
 }
 
 // Scores recorded while the server was down, retried later.
@@ -913,6 +916,7 @@ async function submitScore(score, level, durationMs, mode) {
   const entry = { score, level, durationMs, playedAt, mode };
   // optimistic local update so the end screen is correct straight away
   profile.gamesPlayed++;
+  profile.totalTimeMs = (profile.totalTimeMs || 0) + (durationMs || 0);
   if (score > profile.bestScore) profile.bestScore = score;
   if (level > profile.bestLevel) profile.bestLevel = level;
   profile.history.unshift({ score, level, durationMs, playedAt, mode });
@@ -937,6 +941,7 @@ async function submitScore(score, level, durationMs, mode) {
     profile.rank = mine ? mine.rank : null;
     profile.totalPlayers = board.length;
     profile.bestTimeMs = mine ? mine.durationMs : 0;
+    profile.totalTimeMs = mine ? mine.totalTimeMs : 0;
   }
   fetchLeaderboard();
 }
@@ -960,12 +965,17 @@ async function fetchLeaderboard() {
 function localBoard() {
   const runs = loadLocalRuns();
   const best = new Map();
+  const totals = new Map();
   for (const r of runs) {
     const cur = best.get(r.name);
     if (!cur || compareRunsClient(r, cur) < 0) best.set(r.name, r);
+    totals.set(r.name, (totals.get(r.name) || 0) + (r.durationMs || 0));
   }
   const rows = [...best.values()].sort(compareRunsClient);
-  rows.forEach((r, i) => { r.rank = i + 1; });
+  rows.forEach((r, i) => {
+    r.rank = i + 1;
+    r.totalTimeMs = totals.get(r.name) || 0;   // matches what the server sends
+  });
   return rows;
 }
 
@@ -1544,11 +1554,18 @@ function bombRadius() { return hasPower('blast') ? 15 : 9; }
 // Every throw goes through here so all levels behave the same.
 function throwBombs(speed) {
   const dirs = hasPower('triple') ? [-0.32, 0, 0.32] : [0];
+  // In a boss fight the target is what matters, and the boss often ends up
+  // behind you - so aim at him rather than at whichever way Jerry last walked.
+  let dir = jerry.facing;
+  if (gameState === 'villain' && villain) {
+    dir = Math.sign((villain.x + villain.w / 2) - (jerry.x + jerry.w / 2)) || jerry.facing;
+    jerry.facing = dir;              // turn to look at him as well
+  }
   for (const spread of dirs) {
     bombs.push({
       x: jerry.x + jerry.w / 2,
       y: jerry.y + jerry.h / 2,
-      vx: jerry.facing * (speed || 9),
+      vx: dir * (speed || 9),
       vy: -1.5 + spread * 9,
       r: bombRadius(),
       pierce: hasPower('pierce'),
@@ -3223,7 +3240,9 @@ function drawHUD() {
     ctx.fillText('+' + (lives - maxPips), 316 + maxPips * 19, 23);
   }
 
-  // powerup stage: no bomb until Jerry has hit two power blocks
+  // Bomb slot. Only worth space once bombs are actually in play: before that
+  // it says what to do to earn them, and once armed it only appears when there
+  // is something to say - ready, or recharging.
   ctx.font = 'bold 13px monospace';
   if (jerry.stage < 2) {
     ctx.fillStyle = '#789';
@@ -3232,9 +3251,16 @@ function drawHUD() {
     ctx.fillStyle = hasPower('overdrive') ? '#f9a'
       : hasPower('rapid') ? '#ff8' : '#4af';
     ctx.fillText('[X] BOMB', 448, 23);
-  } else {
+  } else if (jerry.bombCooldown > 0) {
+    // recharging - show how close it is instead of a bare "..."
+    const total = bombCooldownFrames();
+    const done = Math.max(0, 1 - jerry.bombCooldown / total);
     ctx.fillStyle = '#567';
-    ctx.fillText('[X] ...', 448, 23);
+    ctx.fillText('[X]', 448, 23);
+    ctx.fillStyle = 'rgba(74,175,255,0.25)';
+    ctx.fillRect(482, 14, 54, 10);
+    ctx.fillStyle = '#4af';
+    ctx.fillRect(482, 14, 54 * done, 10);
   }
 
   // run timer - this is what settles a tied score
@@ -3493,9 +3519,10 @@ function drawLeaderboard() {
   ctx.fillText('BEST ' + profile.bestScore, 100, cardY + 41);
   ctx.fillText('GAMES ' + profile.gamesPlayed, 216, cardY + 41);
   ctx.fillText('REACHED ' + levelLabel(profile.bestLevel), 326, cardY + 41);
-  if (profile.bestTimeMs) {
+  if (profile.totalTimeMs) {
+    // total time across every run, not just the best one
     ctx.fillStyle = '#9fd';
-    ctx.fillText('TIME ' + fmtTime(profile.bestTimeMs), 486, cardY + 41);
+    ctx.fillText('PLAYED ' + fmtLongTime(profile.totalTimeMs), 486, cardY + 41);
   }
   if (profile.rank) {
     // kept clear of the sound button that floats over the top-right corner
@@ -3515,9 +3542,10 @@ function drawLeaderboard() {
   ctx.font = 'bold 10px monospace';
   ctx.fillText('#',      56,  142);
   ctx.fillText('PLAYER', 108, 142);
-  ctx.fillText('SCORE',  268, 142);
-  ctx.fillText('TIME',   360, 142);
-  ctx.fillText('LEVEL',  440, 142);
+  ctx.fillText('SCORE',  262, 142);
+  ctx.fillText('BEST',   344, 142);   // the run that earned the rank
+  ctx.fillText('PLAYED', 412, 142);   // every run added together
+  ctx.fillText('LEVEL',  492, 142);
   ctx.strokeStyle = 'rgba(74,175,255,0.35)';
   ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(50, 148); ctx.lineTo(tableR, 148); ctx.stroke();
@@ -3551,19 +3579,23 @@ function drawLeaderboard() {
     ctx.fillStyle = me ? '#fff' : '#cfe9ff';
     ctx.fillText(r.name, NAME_X, y);
     ctx.fillStyle = '#fff';
-    ctx.fillText(String(r.score), 268, y);
+    ctx.fillText(String(r.score), 262, y);
     // the deciding number when scores are level
     ctx.fillStyle = '#9fd';
     ctx.font = '12px monospace';
-    ctx.fillText(fmtTime(r.durationMs), 360, y);
+    ctx.fillText(fmtTime(r.durationMs), 344, y);
+    // total across every run this player has finished
+    ctx.fillStyle = '#7fc4a0';
+    ctx.font = '11px monospace';
+    ctx.fillText(fmtLongTime(r.totalTimeMs || r.durationMs), 412, y);
     ctx.fillStyle = '#7e9fbb';
     ctx.font = '10px monospace';
-    ctx.fillText(levelLabel(r.level), 440, y);
+    ctx.fillText(levelLabel(r.level), 492, y);
     // difficulty the run was set to, so scores can be compared fairly
     if (r.mode && r.mode !== 'normal') {
       ctx.fillStyle = r.mode === 'hard' ? '#f88' : '#8d8';
       ctx.font = 'bold 9px monospace';
-      ctx.fillText(r.mode.toUpperCase(), 528, y);
+      ctx.fillText(r.mode.toUpperCase(), 552, y);
     }
   });
 
@@ -4724,6 +4756,18 @@ function fmtTime(ms) {
   if (!ms || ms < 0) return '--:--';
   const t = Math.floor(ms / 1000);
   return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+}
+
+// Totals add up across every run, so they can pass an hour - show h:mm:ss then.
+function fmtLongTime(ms) {
+  if (!ms || ms < 0) return '--:--';
+  const t = Math.floor(ms / 1000);
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = t % 60;
+  return h > 0
+    ? h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+    : m + ':' + String(s).padStart(2, '0');
 }
 
 resetLevel();
