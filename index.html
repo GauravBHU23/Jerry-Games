@@ -1505,6 +1505,18 @@ const LEVELS = [
 
 const FINAL_LEVEL = LEVELS.length;   // 8
 
+// Level 8 is not handed out for finishing level 7 - you have to clear the
+// SMOG GENERAL with at least this many lives left, so the last tower is
+// something a player earns rather than something everyone reaches.
+const GATE_LEVEL = 7;
+// Scaled to the mode, because HARD only starts with 2 lives: EASY needs 3 of
+// its 5, NORMAL 2 of 3, HARD 1 of 2. Never the full starting count - that
+// would demand a flawless level 7 rather than a strong one.
+function gateLives() {
+  const start = diff().lives;
+  return Math.max(1, Math.min(start - 1, Math.ceil(start * 0.6)));
+}
+
 // ============ BOSSES ============
 // Every level ends with the polluter behind it. They get steadily tougher:
 // more health, faster attacks, and extra attack types unlocked by `moves`.
@@ -1694,6 +1706,9 @@ let screenShake = 0;
 let playerName = '';
 let levelReached = 1;    // highest level this run got to, shown on the board
 let scoreSubmitted = false;
+// set when a run ends at the level 7 gate rather than by dying, so the game
+// over screen can explain why it stopped
+let gateFailed = false;
 let runStartedAt = 0;      // wall clock when this run began
 let runDurationMs = 0;     // frozen when the run ends, used to break score ties
 
@@ -1702,7 +1717,7 @@ let runDurationMs = 0;     // frozen when the run ends, used to break score ties
 //   stage 1 (big)    -- hit another power block -> stage 2
 //   stage 2 (armed)  -- big AND able to throw water bombs
 // Taking a hit knocks him down one stage instead of costing a life.
-const BOMB_COOLDOWN = 30; // frames (~0.5s at 60fps)
+const BOMB_COOLDOWN = 46; // frames (~0.77s at 60fps)
 
 const jerry = {
   x: 100, y: 300, vx: 0, vy: 0,
@@ -1792,11 +1807,14 @@ function grantPower(p) {
 }
 
 // Cooldown shrinks as fire-rate powers stack up.
+// The fire-rate powers used to stack down to 5 frames - a bomb every 0.08s,
+// which turned every fight into holding X. They still help, but the floor is
+// high enough that each throw has to be aimed.
 function bombCooldownFrames() {
   let cd = BOMB_COOLDOWN;
-  if (hasPower('rapid')) cd /= 3;
-  if (hasPower('overdrive')) cd /= 2;
-  return Math.max(4, Math.round(cd));
+  if (hasPower('rapid')) cd *= 0.72;
+  if (hasPower('overdrive')) cd *= 0.8;
+  return Math.max(24, Math.round(cd));
 }
 
 function bombRadius() { return hasPower('blast') ? 15 : 9; }
@@ -2326,6 +2344,17 @@ function nextLevel() {
   };
   comboBest = 0;
   breakCombo();
+
+  // THE GATE TO LEVEL 8. Everyone was walking to the final tower, so it meant
+  // nothing to get there. Beating the SMOG GENERAL is not enough on its own -
+  // you have to still be standing, with a life in reserve. Limp out of level 7
+  // on your last life and the run ends there, at level 7, with the score you
+  // earned. It is the one place the game says no.
+  if (level === GATE_LEVEL && lives < gateLives()) {
+    gateFailed = true;
+    gameState = 'gameover';
+    return;
+  }
 
   level++;
   levelReached = Math.max(levelReached, level);
@@ -4925,15 +4954,30 @@ function drawGameOver() {
   ctx.fillStyle = 'rgba(0,0,0,0.88)';
   ctx.fillRect(-VIEW_X - 2, 0, VIEW_W + 4, H);
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#f44';
-  ctx.font = 'bold 52px monospace';
-  ctx.fillText('GAME OVER', W/2, H/2 - 30);
-  ctx.fillStyle = '#fff';
-  ctx.font = '15px monospace';
-  ctx.fillText('The waters remain polluted...', W/2, H/2 + 15);
-  ctx.font = '13px monospace';
-  ctx.fillStyle = '#8bc';
-  ctx.fillText('But Jerry never gives up.', W/2, H/2 + 40);
+  if (gateFailed) {
+    // stopped at the gate, not killed - say exactly what was missing
+    ctx.fillStyle = '#ffd94a';
+    ctx.font = 'bold 40px monospace';
+    ctx.fillText('THE TOWER IS SEALED', W/2, H/2 - 34);
+    ctx.fillStyle = '#fff';
+    ctx.font = '15px monospace';
+    ctx.fillText('You beat the SMOG GENERAL, but only just.', W/2, H/2 + 8);
+    ctx.font = '13px monospace';
+    ctx.fillStyle = '#8bc';
+    ctx.fillText('Reach the end of LEVEL 7 with ' + gateLives() +
+                 (gateLives() === 1 ? ' life' : ' lives') + ' left to enter THE TYCOON TOWER.',
+                 W/2, H/2 + 34);
+  } else {
+    ctx.fillStyle = '#f44';
+    ctx.font = 'bold 52px monospace';
+    ctx.fillText('GAME OVER', W/2, H/2 - 30);
+    ctx.fillStyle = '#fff';
+    ctx.font = '15px monospace';
+    ctx.fillText('The waters remain polluted...', W/2, H/2 + 15);
+    ctx.font = '13px monospace';
+    ctx.fillStyle = '#8bc';
+    ctx.fillText('But Jerry never gives up.', W/2, H/2 + 40);
+  }
   ctx.fillStyle = '#cfe9ff';
   ctx.font = 'bold 14px monospace';
   ctx.fillText('SCORE ' + score + '   ·   LEVEL ' + Math.min(levelReached, FINAL_LEVEL) +
@@ -5616,6 +5660,7 @@ function startRun() {
   fullReset();
   levelReached = 1;
   scoreSubmitted = false;
+  gateFailed = false;
   levelBanner = 150;
   runStartedAt = Date.now();
   runDurationMs = 0;
