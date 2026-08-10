@@ -93,22 +93,65 @@
     color: #4af; font-size: 15px; letter-spacing: 1px; margin-bottom: 8px;
   }
   #nameOverlay p { color: #8bc; font-size: 11px; margin-bottom: 14px; }
-  #nameInput {
+  /* one row of the sign-up / log-in form */
+  #nameOverlay .field { text-align: left; margin-bottom: 10px; }
+  #nameOverlay .field.hide { display: none; }
+  #nameOverlay .field label {
+    display: block;
+    color: #7fb0d8;
+    font-size: 9px;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  #nameOverlay input {
     width: 100%;
-    padding: 11px 12px;
+    padding: 10px 12px;
     font-family: inherit;
-    font-size: 18px;
-    font-weight: bold;
-    text-align: center;
-    letter-spacing: 2px;
-    text-transform: uppercase;
+    font-size: 15px;
     color: #fff;
     background: #06182e;
     border: 2px solid #2a6fa8;
     border-radius: 4px;
     outline: none;
   }
-  #nameInput:focus { border-color: #4af; box-shadow: 0 0 12px rgba(74,175,255,0.5); }
+  #nameOverlay input:focus { border-color: #4af; box-shadow: 0 0 12px rgba(74,175,255,0.5); }
+  #nameOverlay input.invalid {
+    border-color: #d05a5a; box-shadow: 0 0 10px rgba(208,90,90,0.45);
+  }
+  /* the eye sits inside the password box */
+  #nameOverlay .passwrap { position: relative; }
+  #nameOverlay .passwrap input { padding-right: 42px; }
+  #passEye {
+    position: absolute;
+    right: 6px; top: 50%;
+    transform: translateY(-50%);
+    width: 30px; height: 30px;
+    font-size: 14px;
+    line-height: 1;
+    color: #8bc;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 0;
+  }
+  #passEye:hover { color: #fff; background: rgba(74,175,255,0.18); }
+  #passEye.on { color: #4af; }
+  /* the "log in instead / forgot password" links under the button */
+  #authSwitch { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  #nameOverlay .linkbtn {
+    display: none;
+    font-family: inherit;
+    font-size: 10px;
+    color: #8bc;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+  }
+  #nameOverlay .linkbtn.show { display: block; }
+  #nameOverlay .linkbtn b { color: #4af; }
+  #nameOverlay .linkbtn:hover { color: #fff; }
   #nameGo {
     margin-top: 14px;
     width: 100%;
@@ -338,12 +381,39 @@
   <div id="nameOverlay">
     <div class="panel">
       <button id="nameClose" type="button" aria-label="Close" title="Close">✕</button>
-      <h2>◆ ENTER YOUR NAME ◆</h2>
-      <p>Your score will appear on the leaderboard</p>
-      <input id="nameInput" type="text" maxlength="12" placeholder="YOUR NAME" required
-             autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
-      <button id="nameGo">START GAME</button>
-      <div id="nameHint">Max 12 characters</div>
+      <h2 id="authTitle">◆ CREATE ACCOUNT ◆</h2>
+      <p id="authSub">Your username will appear on the leaderboard</p>
+
+      <!-- name: signup only -->
+      <div class="field" id="fieldName">
+        <label for="nameInput">NAME</label>
+        <input id="nameInput" type="text" maxlength="24" placeholder="Your name" required
+               autocomplete="name" autocorrect="off" spellcheck="false">
+      </div>
+
+      <div class="field" id="fieldEmail">
+        <label for="emailInput">EMAIL</label>
+        <input id="emailInput" type="email" maxlength="120" placeholder="you@example.com" required
+               autocomplete="email" autocorrect="off" autocapitalize="off" spellcheck="false">
+      </div>
+
+      <div class="field" id="fieldPass">
+        <label for="passInput"><span id="passLabel">PASSWORD</span></label>
+        <div class="passwrap">
+          <input id="passInput" type="password" maxlength="64" placeholder="••••••" required
+                 autocomplete="current-password" spellcheck="false">
+          <button id="passEye" type="button" title="Show password" aria-label="Show password">👁</button>
+        </div>
+      </div>
+
+      <button id="nameGo">CREATE &amp; PLAY</button>
+      <div id="nameHint">Pick any password you like</div>
+
+      <div id="authSwitch">
+        <button type="button" class="linkbtn" data-mode="login">Already have an account? <b>Log in</b></button>
+        <button type="button" class="linkbtn" data-mode="signup">New here? <b>Create account</b></button>
+        <button type="button" class="linkbtn" data-mode="forgot">Forgot password?</button>
+      </div>
     </div>
   </div>
 
@@ -776,6 +846,9 @@ let boardPressed = false;    // the press that may become a tap started here
 
 const ID_KEY = 'jerry-player-id';
 const NAME_KEY = 'jerry-player-name';
+// only the address, so a returning player lands on the log-in form with it
+// already filled in. The password is never kept on the device.
+const EMAIL_KEY = 'jerry-player-email';
 const PENDING_KEY = 'jerry-pending-scores';
 
 const store = {
@@ -1110,116 +1183,246 @@ nameClose.addEventListener('pointerdown', e => e.stopPropagation());
 // keep taps inside the dialog away from the canvas' tap-to-start
 nameOverlay.addEventListener('pointerdown', e => e.stopPropagation());
 
+// ============ SIGN UP / LOG IN ============
+// Three modes in one panel: create an account, log back in, or set a new
+// password. No tokens - the account is kept in localStorage, which is all a
+// leaderboard needs, and the password never leaves the server in readable form.
+const emailInput = document.getElementById('emailInput');
+const passInput = document.getElementById('passInput');
+const passEye = document.getElementById('passEye');
+const authTitle = document.getElementById('authTitle');
+const authSub = document.getElementById('authSub');
+const passLabel = document.getElementById('passLabel');
+const fieldName = document.getElementById('fieldName');
+const authSwitch = document.getElementById('authSwitch');
+
+let authMode = 'signup';          // signup | login | forgot
+
+const AUTH_MODES = {
+  signup: {
+    title: '◆ CREATE ACCOUNT ◆',
+    sub: 'Your username will appear on the leaderboard',
+    button: 'CREATE & PLAY',
+    hint: 'Pick any password you like',
+    passLabel: 'PASSWORD',
+    showName: true,
+    links: ['login', 'forgot'],
+  },
+  login: {
+    title: '◆ LOG IN ◆',
+    sub: 'Welcome back - your scores are waiting',
+    button: 'LOG IN & PLAY',
+    hint: 'Use the email you signed up with',
+    passLabel: 'PASSWORD',
+    showName: false,
+    links: ['signup', 'forgot'],
+  },
+  forgot: {
+    title: '◆ RESET PASSWORD ◆',
+    sub: 'Enter your email and pick a new password',
+    button: 'SET NEW PASSWORD',
+    hint: 'You will be logged in straight away',
+    passLabel: 'NEW PASSWORD',
+    showName: false,
+    links: ['login', 'signup'],
+  },
+};
+
+function setAuthMode(mode) {
+  authMode = AUTH_MODES[mode] ? mode : 'signup';
+  const m = AUTH_MODES[authMode];
+  authTitle.textContent = m.title;
+  authSub.textContent = m.sub;
+  nameGo.textContent = m.button;
+  passLabel.textContent = m.passLabel;
+  fieldName.classList.toggle('hide', !m.showName);
+  passInput.setAttribute('autocomplete',
+    authMode === 'signup' || authMode === 'forgot' ? 'new-password' : 'current-password');
+  // only the links that make sense from here
+  authSwitch.querySelectorAll('.linkbtn').forEach(b => {
+    b.classList.toggle('show', m.links.includes(b.dataset.mode));
+  });
+  showNameError('');
+  refreshNameState();
+}
+
 function askName() {
   askingName = true;
   nameOverlay.classList.add('show');
-  nameInput.value = profile.name || '';
+  // someone who has signed up before lands on the log-in form
+  setAuthMode(store.get(EMAIL_KEY) ? 'login' : 'signup');
+  nameInput.value = '';
+  emailInput.value = store.get(EMAIL_KEY) || '';
+  passInput.value = '';
   showNameError('');
   refreshNameState();
   // the close button is only useful when there is something to go back to
   nameClose.style.display = profile.id ? 'flex' : 'none';
   // focusing immediately can be ignored on mobile, so defer a frame
-  setTimeout(() => { nameInput.focus(); nameInput.select(); }, 50);
+  setTimeout(() => {
+    const first = authMode === 'signup' ? nameInput : emailInput;
+    first.focus();
+    first.select();
+  }, 50);
 }
 
 function closeNameOverlay() {
   nameOverlay.classList.remove('show');
   askingName = false;
-  nameInput.blur();
+  nameInput.blur(); emailInput.blur(); passInput.blur();
 }
 
 // Backing out of the dialog. Only possible when a player already exists -
-// a first-time visitor has to enter a name to play.
+// a first-time visitor has to sign in to play.
 function cancelName() {
   if (!profile.id) return;
   showNameError('');
   closeNameOverlay();
 }
 
-// A name is required - it is what shows on the shared leaderboard, so an
-// empty one would put anonymous rows there.
-function nameError(raw) {
-  const v = raw.trim();
-  if (!v) return 'Please enter your name';
-  if (v.length < 2) return 'Name must be at least 2 characters';
-  if (!/[a-z0-9]/i.test(v)) return 'Name needs at least one letter or number';
+// What is missing before this form can be sent.
+function authError() {
+  const m = AUTH_MODES[authMode];
+  if (m.showName) {
+    const n = nameInput.value.trim();
+    if (!n) return 'Please enter your name';
+    if (n.length < 2) return 'Name must be at least 2 characters';
+    if (!/[a-z0-9]/i.test(n)) return 'Name needs at least one letter or number';
+  }
+  const em = emailInput.value.trim();
+  if (!em) return 'Please enter your email';
+  if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(em)) return 'That email does not look right';
+  if (passInput.value.length < 4) return 'Password must be at least 4 characters';
   return '';
 }
 
 function showNameError(msg) {
-  nameHint.textContent = msg || 'Max 12 characters';
+  nameHint.textContent = msg || (AUTH_MODES[authMode] || AUTH_MODES.signup).hint;
   nameHint.classList.toggle('error', !!msg);
-  nameInput.classList.toggle('invalid', !!msg);
 }
 
-// Live feedback: enable the button only once the name is usable, then ask the
-// server whether it is still free.
-let nameCheckTimer = null;
-let nameCheckSeq = 0;
-
 function refreshNameState() {
-  const bad = nameError(nameInput.value);
-  nameGo.disabled = !!bad;
-  if (bad) { showNameError(''); return; }
-  showNameError('');
-
-  // debounce so we are not asking on every keystroke
-  clearTimeout(nameCheckTimer);
-  const seq = ++nameCheckSeq;
-  const want = nameInput.value.trim().toUpperCase().slice(0, 12);
-  nameCheckTimer = setTimeout(async () => {
-    // keeping your own name is always fine
-    if (profile.name && want === profile.name.toUpperCase()) return;
-    try {
-      const r = await apiJson(`${API}/player?check=${encodeURIComponent(want)}`);
-      if (seq !== nameCheckSeq) return;              // a newer keystroke won
-      if (r.taken) {
-        showNameError('That name is taken - try another');
-        nameGo.disabled = true;
-      }
-    } catch (e) { /* offline: the submit path still checks */ }
-  }, 350);
+  nameGo.disabled = !!authError();
+  // clear the red outline as soon as a field is being fixed
+  [nameInput, emailInput, passInput].forEach(i => i.classList.remove('invalid'));
 }
 
 async function confirmName() {
-  const raw = nameInput.value;
-  const bad = nameError(raw);
+  const bad = authError();
   if (bad) {
     showNameError(bad);
-    nameInput.focus();
-    return;                       // stop - no anonymous runs
-  }
-  const v = raw.trim().toUpperCase().slice(0, 12);
-  nameGo.disabled = true;
-  nameGo.textContent = 'SAVING...';
-  try {
-    await registerPlayer(v);
-  } catch (e) {
-    // taken, or some other refusal - stay on the dialog and say why
-    nameGo.disabled = false;
-    nameGo.textContent = 'START GAME';
-    showNameError(e.status === 409 ? 'That name is taken - try another'
-                                   : 'Could not save that name, try again');
-    nameInput.focus();
-    nameInput.select();
+    // point at the field that needs attention
+    const target = /name/i.test(bad) ? nameInput
+                 : /email/i.test(bad) ? emailInput : passInput;
+    target.classList.add('invalid');
+    target.focus();
     return;
   }
+
+  const busy = { signup: 'CREATING...', login: 'LOGGING IN...', forgot: 'SAVING...' }[authMode];
+  const label = nameGo.textContent;
+  nameGo.disabled = true;
+  nameGo.textContent = busy;
+
+  try {
+    await submitAuth();
+  } catch (e) {
+    nameGo.disabled = false;
+    nameGo.textContent = label;
+    showNameError(e.message || 'Something went wrong, try again');
+    // an existing email on signup is really an invitation to log in
+    if (authMode === 'signup' && e.status === 409) {
+      emailInput.classList.add('invalid');
+      setTimeout(() => { setAuthMode('login'); showNameError('You already have an account - log in'); }, 900);
+    } else if (authMode === 'login' && e.status === 401) {
+      passInput.classList.add('invalid');
+      passInput.focus(); passInput.select();
+    } else if (e.status === 404) {
+      emailInput.classList.add('invalid');
+      emailInput.focus();
+    }
+    return;
+  }
+
   nameGo.disabled = false;
-  nameGo.textContent = 'START GAME';
+  nameGo.textContent = label;
   closeNameOverlay();
   unlockAudio();
   fetchLeaderboard();
   startRun();
 }
 
-nameGo.addEventListener('click', e => { e.stopPropagation(); confirmName(); });
-nameInput.addEventListener('input', refreshNameState);
-nameInput.addEventListener('keydown', e => {
-  e.stopPropagation();            // do not drive the game while typing
-  if (e.key === 'Enter') confirmName();
-  if (e.key === 'Escape') cancelName();
+// Talks to /api/auth and stores whoever comes back.
+async function submitAuth() {
+  const body = {
+    name: nameInput.value.trim(),
+    email: emailInput.value.trim(),
+    password: passInput.value,
+  };
+  // the panel calls it "forgot"; the API calls the same thing "reset"
+  const action = authMode === 'forgot' ? 'reset' : authMode;
+  const acc = await apiJson(`${API}/auth?action=${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  applyAccount(acc);
+  // Pull in their scores and rank. applyAccount() has already stored the id,
+  // so this loads the account we just signed in as. A failure here only means
+  // the stats are stale - they are still logged in.
+  try { await loadSavedPlayer(); } catch (e) {}
+  // loadSavedPlayer() overwrites the name from the players table; the account's
+  // username is the authority.
+  profile.name = acc.username;
+  playerName = acc.username;
+  return acc;
+}
+
+// Remembers the account on this device and points the game at it.
+function applyAccount(acc) {
+  profile.id = acc.id;
+  profile.name = acc.username;
+  playerName = acc.username;
+  profile.returning = false;
+  store.set(ID_KEY, acc.id);
+  store.set(NAME_KEY, acc.username);
+  store.set(EMAIL_KEY, acc.email);
+}
+
+passEye.addEventListener('pointerdown', e => e.stopPropagation());
+passEye.addEventListener('click', e => {
+  e.stopPropagation();
+  const show = passInput.type === 'password';
+  passInput.type = show ? 'text' : 'password';
+  passEye.classList.toggle('on', show);
+  passEye.title = show ? 'Hide password' : 'Show password';
+  passInput.focus();
 });
-nameInput.addEventListener('keyup', e => e.stopPropagation());
+
+authSwitch.addEventListener('pointerdown', e => e.stopPropagation());
+authSwitch.addEventListener('click', e => {
+  const btn = e.target.closest('.linkbtn');
+  if (!btn) return;
+  e.stopPropagation();
+  setAuthMode(btn.dataset.mode);
+  setTimeout(() => {
+    const first = authMode === 'signup' ? nameInput : emailInput;
+    first.focus();
+  }, 30);
+});
+
+nameGo.addEventListener('click', e => { e.stopPropagation(); confirmName(); });
+
+// every field behaves the same: type freely, Enter sends, Escape backs out
+for (const input of [nameInput, emailInput, passInput]) {
+  input.addEventListener('input', refreshNameState);
+  input.addEventListener('keydown', e => {
+    e.stopPropagation();          // do not drive the game while typing
+    if (e.key === 'Enter') confirmName();
+    if (e.key === 'Escape') cancelName();
+  });
+  input.addEventListener('keyup', e => e.stopPropagation());
+}
 
 // "Not you?" - lets a second person on the same device get their own id
 const switchBtn = document.getElementById('switchPlayer');

@@ -27,7 +27,8 @@ const SCORES_HEADER = 'id,name,score,level,durationMs,playedAt';
 // ---------- data ----------
 // All storage and ranking lives in lib/store.js, shared with the Vercel
 // serverless functions in api/ so both paths behave identically.
-const { backend, buildLeaderboard, playerProfile, usingPostgres } = require('./lib/store');
+const { backend, buildLeaderboard, playerProfile, usingPostgres,
+        signup, login, resetPassword } = require('./lib/store');
 
 // ---------- http ----------
 function sendJson(res, code, data) {
@@ -86,6 +87,20 @@ const server = http.createServer(async (req, res) => {
       const limit = Math.min(200, Number(url.searchParams.get('limit')) || 50);
       const rows = await buildLeaderboard();
       return sendJson(res, 200, { rows: rows.slice(0, limit) });
+    }
+
+    // --- accounts: signup / login / forgot-password ---
+    if (pathname === '/api/auth' && req.method === 'POST') {
+      const action = String(url.searchParams.get('action') || '').toLowerCase();
+      const body = await readBody(req);
+      try {
+        if (action === 'signup') return sendJson(res, 201, await signup(body));
+        if (action === 'login')  return sendJson(res, 200, await login(body));
+        if (action === 'reset')  return sendJson(res, 200, await resetPassword(body));
+        return sendJson(res, 400, { error: 'unknown action' });
+      } catch (e) {
+        return sendJson(res, e.status || 500, { error: e.message });
+      }
     }
 
     // both shapes work: /api/player?id=x (what Vercel needs) and /api/player/x

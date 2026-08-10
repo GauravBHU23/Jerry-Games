@@ -7,3 +7,5 @@ node_modules/
 # local score data
 media/players.csv
 media/scores.csv
+# accounts: real email addresses and password hashes - never commit these
+media/accounts.csv
