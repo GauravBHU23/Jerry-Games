@@ -1298,53 +1298,72 @@ const FINAL_LEVEL = LEVELS.length;   // 8
 //  moves     which attacks it can use
 //  minions   enemy type it summons (null = none)
 const BOSSES = [
+  // Each boss is a different kind of polluter, so each one is built and drawn
+  // differently and owns a signature attack nobody else has. `shape` picks the
+  // body drawn in drawVillain(); `signature` is the move only this boss knows.
   { n: 1, name: 'THE TRASH BARON', title: 'Illegal Dumping',
-    hp: 5, gap: 96, speed: 1.7, w: 52, h: 74, color: '#4a4a3a', accent: '#7a6a2a',
-    moves: ['lob', 'spray'], minions: null, minionGap: 0,
-    taunt: 'THE TRASH BARON dumps waste for profit. Bomb him!',
-    fact: 'Illegal dumping poisons rivers for decades. Report it!' },
+    hp: 5, gap: 96, speed: 1.7, w: 56, h: 76, color: '#4a4a3a', accent: '#7a6a2a',
+    shape: 'hauler', signature: 'trashfall',
+    moves: ['lob', 'trashfall'], minions: null, minionGap: 0,
+    taunt: 'THE TRASH BARON tips whole truckloads into the river. Bomb him!',
+    fact: 'Illegal dumping poisons rivers for decades. Report it!',
+    tip: 'Rubbish rains from above - keep moving and watch the shadows.' },
 
   { n: 2, name: 'DRUM WARDEN', title: 'Chemical Storage',
-    hp: 7, gap: 86, speed: 1.9, w: 54, h: 78, color: '#7a3a2a', accent: '#c04040',
-    moves: ['lob', 'spray', 'summon'], minions: 'drum', minionGap: 260,
-    taunt: 'DRUM WARDEN hoards leaking chemical drums. Take him down!',
-    fact: 'Corroded drums leak solvents straight into groundwater.' },
+    hp: 7, gap: 86, speed: 1.9, w: 58, h: 80, color: '#7a3a2a', accent: '#c04040',
+    shape: 'drumstack', signature: 'rollout',
+    moves: ['spray', 'rollout', 'summon'], minions: 'drum', minionGap: 260,
+    taunt: 'DRUM WARDEN rolls his leaking barrels straight at you!',
+    fact: 'Corroded drums leak solvents straight into groundwater.',
+    tip: 'Rolling drums cannot be stomped - jump them or bomb them.' },
 
   { n: 3, name: 'SLUDGE BARGE', title: 'Waste Transport',
-    hp: 9, gap: 78, speed: 2.05, w: 62, h: 72, color: '#3a4a2a', accent: '#7aa83a',
-    moves: ['spray', 'slam', 'lob'], minions: 'barrel', minionGap: 230,
-    taunt: 'The SLUDGE BARGE empties its tanks into the marsh!',
-    fact: 'Dumping sludge at sea was banned worldwide - but it still happens.' },
+    hp: 9, gap: 78, speed: 2.05, w: 74, h: 66, color: '#3a4a2a', accent: '#7aa83a',
+    shape: 'barge', signature: 'sludgetide',
+    moves: ['sludgetide', 'slam', 'spray'], minions: 'barrel', minionGap: 230,
+    taunt: 'The SLUDGE BARGE floods the marsh with a rising tide!',
+    fact: 'Dumping sludge at sea was banned worldwide - but it still happens.',
+    tip: 'When the tide rises, get up onto a platform.' },
 
   { n: 4, name: 'DRONE MARSHAL', title: 'Private Security',
-    hp: 11, gap: 70, speed: 2.2, w: 56, h: 76, color: '#3a3a4a', accent: '#5a6a9a',
-    moves: ['lob', 'summon', 'spray'], minions: 'drone', minionGap: 160,
-    taunt: 'The DRONE MARSHAL guards the polluters. Clear the skies!',
-    fact: 'Communities that monitor rivers force polluters to clean up.' },
+    hp: 11, gap: 70, speed: 2.2, w: 60, h: 58, color: '#3a3a4a', accent: '#5a6a9a',
+    shape: 'drone', signature: 'laser',
+    moves: ['laser', 'summon', 'lob'], minions: 'drone', minionGap: 160,
+    taunt: 'The DRONE MARSHAL hunts you with targeting lasers!',
+    fact: 'Communities that monitor rivers force polluters to clean up.',
+    tip: 'He hovers out of reach - the red beam warns before it fires.' },
 
   { n: 5, name: 'PIPE FOREMAN', title: 'Effluent Pipes',
-    hp: 13, gap: 64, speed: 2.35, w: 58, h: 80, color: '#5a4a3a', accent: '#a8763a',
-    moves: ['spray', 'slam', 'lob', 'summon'], minions: 'drum', minionGap: 200,
+    hp: 13, gap: 64, speed: 2.35, w: 62, h: 84, color: '#5a4a3a', accent: '#a8763a',
+    shape: 'pipeworks', signature: 'outfall',
+    moves: ['outfall', 'slam', 'spray', 'summon'], minions: 'drum', minionGap: 200,
     taunt: 'The PIPE FOREMAN opens every outfall at once!',
-    fact: 'Treated effluent must be tested before it can be released.' },
+    fact: 'Treated effluent must be tested before it can be released.',
+    tip: 'Jets burst from the floor pipes - do not stand still.' },
 
   { n: 6, name: 'TOXIC BARON', title: 'Heavy Metals',
-    hp: 15, gap: 58, speed: 2.5, w: 58, h: 82, color: '#4a2a5a', accent: '#a83ac0',
-    moves: ['spray', 'summon', 'slam', 'lob'], minions: 'spitter', minionGap: 180,
-    taunt: 'The TOXIC BARON floods the outfall with heavy metals!',
-    fact: 'Lead and mercury never break down - they build up in fish and people.' },
+    hp: 15, gap: 58, speed: 2.5, w: 60, h: 84, color: '#4a2a5a', accent: '#a83ac0',
+    shape: 'hazmat', signature: 'mercury',
+    moves: ['mercury', 'summon', 'spray', 'slam'], minions: 'spitter', minionGap: 180,
+    taunt: 'The TOXIC BARON splits into droplets of mercury!',
+    fact: 'Lead and mercury never break down - they build up in fish and people.',
+    tip: 'His mercury blobs split in two when you bomb them.' },
 
   { n: 7, name: 'SMOG GENERAL', title: 'Air & Water Emissions',
-    hp: 17, gap: 52, speed: 2.65, w: 60, h: 84, color: '#4a4a4a', accent: '#8a8a8a',
-    moves: ['lob', 'spray', 'summon', 'slam', 'rage'], minions: 'chaser', minionGap: 165,
+    hp: 17, gap: 52, speed: 2.65, w: 66, h: 88, color: '#4a4a4a', accent: '#8a8a8a',
+    shape: 'stack', signature: 'smogcloud',
+    moves: ['smogcloud', 'spray', 'summon', 'slam'], minions: 'chaser', minionGap: 165,
     taunt: 'The SMOG GENERAL blots out the sun. Fight through it!',
-    fact: 'Acid rain from smokestacks acidifies lakes hundreds of miles away.' },
+    fact: 'Acid rain from smokestacks acidifies lakes hundreds of miles away.',
+    tip: 'The smog hides the arena - listen and keep your distance.' },
 
   { n: 8, name: 'THE GREEDY TYCOON', title: 'He owns them all',
-    hp: 20, gap: 44, speed: 2.85, w: 54, h: 96, color: '#2a2a3a', accent: '#c0392b',
-    moves: ['lob', 'spray', 'summon', 'slam', 'rage'], minions: 'chaser', minionGap: 140,
+    hp: 20, gap: 44, speed: 2.85, w: 58, h: 98, color: '#2a2a3a', accent: '#c0392b',
+    shape: 'tycoon', signature: 'buyout',
+    moves: ['buyout', 'lob', 'spray', 'summon', 'slam', 'rage'], minions: 'chaser', minionGap: 140,
     taunt: 'THE GREEDY TYCOON! He owns every polluter you have beaten. End this!',
-    fact: 'Holding owners accountable is how rivers actually get cleaned up.' },
+    fact: 'Holding owners accountable is how rivers actually get cleaned up.',
+    tip: 'He buys back his fallen bosses - expect their attacks too.' },
 ];
 
 function bossDef(n) {
@@ -1574,16 +1593,24 @@ function throwBombs(speed) {
   // In a boss fight the target is what matters, and the boss often ends up
   // behind you - so aim at him rather than at whichever way Jerry last walked.
   let dir = jerry.facing;
+  // A flat throw is right for ground enemies but never reaches a boss who
+  // flies; lift the arc towards whatever we are actually aiming at.
+  let lift = -1.5;
   if (gameState === 'villain' && villain) {
     dir = Math.sign((villain.x + villain.w / 2) - (jerry.x + jerry.w / 2)) || jerry.facing;
     jerry.facing = dir;              // turn to look at him as well
+    // Solve for the launch speed that peaks at the boss's height: with
+    // gravity g per frame, rising dy needs vy = sqrt(2*g*dy), plus a little
+    // margin so the bomb is still climbing when it arrives.
+    const dy = (jerry.y + jerry.h / 2) - (villain.y + villain.h / 2);
+    if (dy > 40) lift = -Math.sqrt(2 * (GRAVITY * 0.5) * (dy + 40));
   }
   for (const spread of dirs) {
     bombs.push({
       x: jerry.x + jerry.w / 2,
       y: jerry.y + jerry.h / 2,
       vx: dir * (speed || 9),
-      vy: -1.5 + spread * 9,
+      vy: lift + spread * 9,
       r: bombRadius(),
       pierce: hasPower('pierce'),
       hits: 0,
@@ -2163,7 +2190,8 @@ function startVillain() {
   villain = {
     def: d,
     name: d.name,
-    x: 600, y: GROUND_Y - d.h, w: d.w, h: d.h,
+    // the flying boss starts at his hover height, not on the floor
+    x: 600, y: d.shape === 'drone' ? 196 : GROUND_Y - d.h, w: d.w, h: d.h,
     vx: -d.speed, vy: 0, onGround: true,
     hp: d.hp, maxHp: d.hp,
     hurt: 0,           // flash timer after taking a hit
@@ -2173,8 +2201,16 @@ function startVillain() {
     minionTimer: d.minionGap || 0,
     slam: 0,           // shockwave animation timer
     rage: 0,           // final boss only: temporary frenzy
+    // signature-move state, cleared for every new fight
+    tide: 0,           // L3 rising sludge
+    smog: 0,           // L7 blinding cloud
+    laserAim: null,    // L4 targeting beam
+    laserFire: 0,
+    lastLaserX: 0,
+    bought: null,      // L8 borrowed boss
+    hover: 0,          // L4 flight bob
   };
-  showPopup('BOSS: ' + d.taunt);
+  showPopup('BOSS: ' + d.taunt + (d.tip ? '  ' + d.tip : ''));
 }
 
 function updateVillain() {
@@ -2240,29 +2276,64 @@ function updateVillain() {
   if (v.x + v.w > W - 40) { v.x = W - 40 - v.w; v.vx = -Math.abs(v.vx); }
   v.facing = Math.sign(v.vx) || -1;
 
-  // gravity for his jumps
-  v.vy += GRAVITY;
-  v.y += v.vy;
-  if (v.y + v.h >= GROUND_Y) {
-    if (!v.onGround && v.slamPending) {
-      // landing from a slam sends a shockwave along the floor
-      v.slamPending = false;
-      v.slam = 26;
-      screenShake = 14;
-      sfx('boom');
-      for (const dir of [-1, 1]) {
-        villainShots.push({
-          x: v.x + v.w / 2, y: GROUND_Y - 10,
-          vx: dir * 5.2, vy: 0, r: 11, kind: 'wave', spin: 0, ground: true,
-        });
+  // The DRONE MARSHAL flies instead of walking, so he cannot be stomped and
+  // has to be brought down with bombs.
+  if (d.shape === 'drone') {
+    v.hover = (v.hover || 0) + 0.045;
+    // low enough that a lobbed bomb can reach him from the floor
+    v.y = 196 + Math.sin(v.hover) * 44;
+    v.vy = 0;
+    v.onGround = false;
+  } else {
+    // gravity for his jumps
+    v.vy += GRAVITY;
+    v.y += v.vy;
+    if (v.y + v.h >= GROUND_Y) {
+      if (!v.onGround && v.slamPending) {
+        // landing from a slam sends a shockwave along the floor
+        v.slamPending = false;
+        v.slam = 26;
+        screenShake = 14;
+        sfx('boom');
+        for (const dir of [-1, 1]) {
+          villainShots.push({
+            x: v.x + v.w / 2, y: GROUND_Y - 10,
+            vx: dir * 5.2, vy: 0, r: 11, kind: 'wave', spin: 0, ground: true,
+          });
+        }
       }
+      v.y = GROUND_Y - v.h; v.vy = 0; v.onGround = true;
     }
-    v.y = GROUND_Y - v.h; v.vy = 0; v.onGround = true;
   }
 
   if (v.hurt > 0) v.hurt--;
   if (v.slam > 0) v.slam--;
   if (v.rage > 0) v.rage--;
+  if (v.smog > 0) v.smog--;
+  if (v.bought && --v.bought.timer <= 0) v.bought = null;
+
+  // SLUDGE TIDE: the floor itself becomes deadly for a while, so the only
+  // safe ground is the arena platforms.
+  if (v.tide > 0) {
+    v.tide--;
+    if (jerry.invuln <= 0 && jerry.y + jerry.h > GROUND_Y - 14) damagePlayer();
+  }
+
+  // TARGETING LASER: paints a line, then fires down it.
+  if (v.laserAim) {
+    v.laserAim.timer--;
+    if (v.laserAim.timer <= 0) {
+      const lx = v.laserAim.x;
+      v.lastLaserX = lx;
+      v.laserFire = 12;
+      screenShake = 8;
+      sfx('boom');
+      if (jerry.invuln <= 0 && jerry.x + jerry.w > lx - 13 && jerry.x < lx + 13) damagePlayer();
+      spawnParticles(lx, GROUND_Y - 20, '#f66', 14);
+      v.laserAim = null;
+    }
+  }
+  if (v.laserFire > 0) v.laserFire--;
 
   // summon helpers on their own timer
   if (d.minions && d.minionGap) {
@@ -2288,8 +2359,12 @@ function updateVillain() {
     v.attackTimer = Math.max(24, Math.round(base * (v.rage > 0 ? 0.5 : 1))) +
                     Math.floor(Math.random() * 24);
 
+    // A boss leans on the move that defines him, so each fight reads as its
+    // own thing rather than a shuffle of the same handful of attacks.
     const moves = d.moves;
-    const pick = moves[Math.floor(Math.random() * moves.length)];
+    const pick = (d.signature && Math.random() < 0.45)
+      ? d.signature
+      : moves[Math.floor(Math.random() * moves.length)];
     const dirTo = Math.sign((jerry.x + jerry.w / 2) - (v.x + v.w / 2)) || -1;
 
     if (pick === 'lob') {
@@ -2330,6 +2405,117 @@ function updateVillain() {
       screenShake = 10;
       sfx('boom');
       spawnParticles(v.x + v.w / 2, v.y + v.h / 2, '#f44', 26);
+
+    // ---- signature attacks: one per boss ----
+    } else if (pick === 'trashfall') {
+      // L1 - tips a truckload from above. Shadows warn where it will land.
+      const n = 2 + v.phase;
+      for (let i = 0; i < n; i++) {
+        const tx = 80 + Math.random() * (W - 160);
+        villainShots.push({
+          x: tx, y: -20 - i * 70, vx: 0, vy: 2.6 + v.phase * 0.5,
+          r: 12, kind: 'junk', spin: Math.random() * 6, warn: true,
+        });
+      }
+      sfx('hurt');
+
+    } else if (pick === 'rollout') {
+      // L2 - rolls leaking drums along the floor; jump them or bomb them.
+      const n = 1 + Math.floor(v.phase / 2);
+      for (let i = 0; i < n; i++) {
+        villainShots.push({
+          x: v.x + v.w / 2, y: GROUND_Y - 16,
+          vx: dirTo * (3.4 + v.phase * 0.6), vy: 0,
+          r: 15, kind: 'drum', spin: 0, rolls: true,
+        });
+      }
+      sfx('hurt');
+
+    } else if (pick === 'sludgetide') {
+      // L3 - floods the arena floor; you have to be off the ground.
+      v.tide = 190;
+      screenShake = 6;
+      sfx('hurt');
+      showPopup('THE TIDE RISES - GET OFF THE FLOOR!');
+
+    } else if (pick === 'laser') {
+      // L4 - paints a beam on Jerry, then fires down it a moment later.
+      v.laserAim = { x: jerry.x + jerry.w / 2, timer: 45 };
+      sfx('jump');
+
+    } else if (pick === 'outfall') {
+      // L5 - jets burst upward from fixed pipes in the floor.
+      const lanes = [120, 300, 480, 660];
+      const count = 2 + Math.floor(v.phase / 2);
+      const chosen = lanes.sort(() => Math.random() - 0.5).slice(0, count);
+      for (const lx of chosen) {
+        villainShots.push({
+          x: lx, y: GROUND_Y - 4, vx: 0, vy: -7.5,
+          r: 11, kind: 'jet', spin: 0, warn: true, life: 90,
+        });
+      }
+      sfx('hurt');
+
+    } else if (pick === 'mercury') {
+      // L6 - heavy blobs that split in two when bombed.
+      for (let i = 0; i < 2; i++) {
+        villainShots.push({
+          x: v.x + v.w / 2, y: v.y + 16,
+          vx: (i === 0 ? -1 : 1) * (2.2 + v.phase * 0.4), vy: -5.5,
+          r: 13, kind: 'mercury', spin: 0, splits: 1,
+        });
+      }
+      sfx('hurt');
+
+    } else if (pick === 'smogcloud') {
+      // L7 - drops a rolling bank of smog that hides the arena.
+      v.smog = 240;
+      screenShake = 5;
+      sfx('boom');
+      showPopup('SMOG! You can barely see him.');
+
+    } else if (pick === 'buyout') {
+      // L8 - buys back a boss you already beat and borrows its attack.
+      const owned = BOSSES.slice(0, 7);
+      const bought = owned[Math.floor(Math.random() * owned.length)];
+      v.bought = { name: bought.name, timer: 110 };
+      showPopup('BOUGHT OUT: ' + bought.name + ' fights for him!');
+      // fire that boss's signature straight away
+      if (bought.signature === 'trashfall') {
+        for (let i = 0; i < 3; i++) {
+          villainShots.push({
+            x: 80 + Math.random() * (W - 160), y: -20 - i * 70,
+            vx: 0, vy: 3.2, r: 12, kind: 'junk', spin: 0, warn: true,
+          });
+        }
+      } else if (bought.signature === 'rollout') {
+        villainShots.push({
+          x: v.x + v.w / 2, y: GROUND_Y - 16,
+          vx: dirTo * 4.4, vy: 0, r: 15, kind: 'drum', spin: 0, rolls: true,
+        });
+      } else if (bought.signature === 'mercury') {
+        for (let i = 0; i < 2; i++) {
+          villainShots.push({
+            x: v.x + v.w / 2, y: v.y + 16,
+            vx: (i === 0 ? -1 : 1) * 3, vy: -5.5,
+            r: 13, kind: 'mercury', spin: 0, splits: 1,
+          });
+        }
+      } else if (bought.signature === 'outfall') {
+        for (const lx of [200, 420, 620]) {
+          villainShots.push({
+            x: lx, y: GROUND_Y - 4, vx: 0, vy: -7.5,
+            r: 11, kind: 'jet', spin: 0, warn: true, life: 90,
+          });
+        }
+      } else if (bought.signature === 'sludgetide') {
+        v.tide = 150;
+      } else if (bought.signature === 'smogcloud') {
+        v.smog = 160;
+      } else {
+        v.laserAim = { x: jerry.x + jerry.w / 2, timer: 45 };
+      }
+      sfx('boom');
     }
   }
 
@@ -2401,6 +2587,26 @@ function updateVillain() {
       s.y = GROUND_Y - 10;
       s.spin += 0.3;
       if (s.x < -60 || s.x > W + 60) s.dead = true;
+    } else if (s.rolls) {
+      // a drum rolling along the floor - keeps going until it leaves the arena
+      s.x += s.vx;
+      s.y = GROUND_Y - s.r;
+      s.spin += 0.26 * Math.sign(s.vx);
+      if (s.x < -60 || s.x > W + 60) s.dead = true;
+    } else if (s.kind === 'jet') {
+      // an outfall jet: bursts up, hangs, then dies back down
+      if (s.warn) { if (--s.life <= 60) s.warn = false; }
+      else {
+        s.y += s.vy;
+        s.vy += GRAVITY * 0.35;
+        if (--s.life <= 0 || s.y > GROUND_Y + 10) s.dead = true;
+      }
+      s.spin += 0.25;
+    } else if (s.kind === 'junk') {
+      // falling rubbish - straight down, no arc
+      s.y += s.vy;
+      s.spin += 0.14;
+      if (s.y - s.r > H) s.dead = true;
     } else {
       s.vy += GRAVITY * 0.55;
       s.x += s.vx; s.y += s.vy;
@@ -2425,6 +2631,31 @@ function updateVillain() {
     b.vy += GRAVITY * 0.5;
     b.x += b.vx; b.y += b.vy;
     if (b.y > H + 50 || b.x < -50 || b.x > W + 50) b.dead = true;
+
+    // Mercury splits instead of dying: bombing a blob buys you nothing unless
+    // you finish off both halves, which is what makes the TOXIC BARON awkward.
+    if (!b.dead) {
+      for (const s of villainShots) {
+        if (s.dead || s.kind !== 'mercury') continue;
+        if (!rectHit({ x: b.x - b.r, y: b.y - b.r, w: b.r*2, h: b.r*2 },
+                     { x: s.x - s.r, y: s.y - s.r, w: s.r*2, h: s.r*2 })) continue;
+        b.dead = true;
+        s.dead = true;
+        score += 60;
+        sfx('boom');
+        spawnParticles(s.x, s.y, '#c9c9d8', 12);
+        if (s.splits > 0) {
+          for (const dir of [-1, 1]) {
+            villainShots.push({
+              x: s.x, y: s.y, vx: dir * 2.6, vy: -3.4,
+              r: Math.max(7, s.r - 5), kind: 'mercury', spin: 0, splits: s.splits - 1,
+            });
+          }
+        }
+        break;
+      }
+    }
+
     if (!b.dead && v.hurt <= 0 &&
         rectHit({ x: b.x - b.r, y: b.y - b.r, w: b.r*2, h: b.r*2 }, v)) {
       b.dead = true;
@@ -2837,92 +3068,267 @@ function drawVillain() {
   const skin = flash ? '#fff' : '#e8b98a';
   const suit = flash ? '#fff' : d.color;
   const trim = flash ? '#fff' : d.accent;
+  const look = v.facing > 0 ? 2 * S : -2 * S;
 
-  // legs
-  ctx.fillStyle = suit;
-  ctx.fillRect(v.x + 10 * S, bodyTop + 36 * S, 14 * S, v.h - 62 * S);
-  ctx.fillRect(v.x + v.w - 24 * S, bodyTop + 36 * S, 14 * S, v.h - 62 * S);
-  // shoes
-  ctx.fillStyle = flash ? '#fff' : '#111';
-  ctx.fillRect(v.x + 6 * S, v.y + v.h - 8 * S, 20 * S, 8 * S);
-  ctx.fillRect(v.x + v.w - 26 * S, v.y + v.h - 8 * S, 20 * S, 8 * S);
+  // Every boss is a different kind of polluter, so each gets its own body
+  // rather than one businessman in eight colours.
+  const shape = d.shape || 'tycoon';
 
-  // body
-  ctx.fillStyle = suit;
-  ctx.fillRect(v.x, bodyTop, v.w, 40 * S);
-  // shirt
-  ctx.fillStyle = flash ? '#fff' : '#e8e8e8';
-  ctx.fillRect(v.x + v.w / 2 - 9 * S, bodyTop + 2 * S, 18 * S, 34 * S);
-  // tie in the boss's accent colour
-  ctx.fillStyle = trim;
-  ctx.beginPath();
-  ctx.moveTo(v.x + v.w / 2, bodyTop + 2 * S);
-  ctx.lineTo(v.x + v.w / 2 - 5 * S, bodyTop + 10 * S);
-  ctx.lineTo(v.x + v.w / 2, bodyTop + 32 * S);
-  ctx.lineTo(v.x + v.w / 2 + 5 * S, bodyTop + 10 * S);
-  ctx.closePath(); ctx.fill();
+  // ---- the human bosses share a torso, but wear their trade ----
+  const drawLegs = () => {
+    ctx.fillStyle = suit;
+    ctx.fillRect(v.x + 10 * S, bodyTop + 36 * S, 14 * S, v.h - 62 * S);
+    ctx.fillRect(v.x + v.w - 24 * S, bodyTop + 36 * S, 14 * S, v.h - 62 * S);
+    ctx.fillStyle = flash ? '#fff' : '#111';
+    ctx.fillRect(v.x + 6 * S, v.y + v.h - 8 * S, 20 * S, 8 * S);
+    ctx.fillRect(v.x + v.w - 26 * S, v.y + v.h - 8 * S, 20 * S, 8 * S);
+  };
+  const drawArms = () => {
+    ctx.fillStyle = suit;
+    ctx.fillRect(v.x - 6 * S, bodyTop + 4 * S, 10 * S, 26 * S);
+    ctx.fillRect(v.x + v.w - 4 * S, bodyTop + 4 * S, 10 * S, 26 * S);
+    ctx.fillStyle = skin;
+    ctx.fillRect(v.x - 6 * S, bodyTop + 28 * S, 10 * S, 8 * S);
+    ctx.fillRect(v.x + v.w - 4 * S, bodyTop + 28 * S, 10 * S, 8 * S);
+  };
+  const drawFace = () => {
+    ctx.fillStyle = skin;
+    ctx.fillRect(v.x + 12 * S, v.y + 2 * S, v.w - 24 * S, 26 * S);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(v.x + 17 * S, v.y + 10 * S, 8 * S, 7 * S);
+    ctx.fillRect(v.x + v.w - 25 * S, v.y + 10 * S, 8 * S, 7 * S);
+    ctx.fillStyle = raging ? '#f00' : '#000';
+    ctx.fillRect(v.x + 19 * S + look, v.y + 12 * S, 4 * S, 4 * S);
+    ctx.fillRect(v.x + v.w - 23 * S + look, v.y + 12 * S, 4 * S, 4 * S);
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(v.x + 16 * S, v.y + 7 * S); ctx.lineTo(v.x + 26 * S, v.y + 11 * S);
+    ctx.moveTo(v.x + v.w - 16 * S, v.y + 7 * S); ctx.lineTo(v.x + v.w - 26 * S, v.y + 11 * S);
+    ctx.beginPath();
+    ctx.moveTo(v.x + 20 * S, v.y + 24 * S); ctx.lineTo(v.x + v.w - 20 * S, v.y + 24 * S);
+    ctx.stroke();
+  };
+  const drawTorso = () => {
+    ctx.fillStyle = suit;
+    ctx.fillRect(v.x, bodyTop, v.w, 40 * S);
+  };
 
-  // arms
-  ctx.fillStyle = suit;
-  ctx.fillRect(v.x - 6 * S, bodyTop + 4 * S, 10 * S, 26 * S);
-  ctx.fillRect(v.x + v.w - 4 * S, bodyTop + 4 * S, 10 * S, 26 * S);
-  ctx.fillStyle = skin;
-  ctx.fillRect(v.x - 6 * S, bodyTop + 28 * S, 10 * S, 8 * S);
-  ctx.fillRect(v.x + v.w - 4 * S, bodyTop + 28 * S, 10 * S, 8 * S);
+  if (shape === 'hauler') {
+    // L1 - a bin man behind a tipped-up rubbish skip
+    drawLegs(); drawTorso(); drawArms();
+    ctx.fillStyle = flash ? '#fff' : '#2f2f2f';
+    ctx.fillRect(v.x - 4 * S, bodyTop + 6 * S, v.w + 8 * S, 26 * S);
+    ctx.strokeStyle = flash ? '#fff' : trim; ctx.lineWidth = 2;
+    ctx.strokeRect(v.x - 4 * S, bodyTop + 6 * S, v.w + 8 * S, 26 * S);
+    // rubbish spilling over the lip
+    ctx.fillStyle = flash ? '#fff' : '#6a5a3a';
+    for (let i = 0; i < 4; i++) {
+      ctx.fillRect(v.x + 2 * S + i * 13 * S, bodyTop + 1 * S, 9 * S, 7 * S);
+    }
+    drawFace();
+    // flat cap
+    ctx.fillStyle = flash ? '#fff' : '#3a3a2a';
+    ctx.fillRect(v.x + 8 * S, v.y - 3 * S, v.w - 16 * S, 7 * S);
+    ctx.fillRect(v.x + 4 * S, v.y + 2 * S, v.w - 8 * S, 3 * S);
 
-  // head
-  ctx.fillStyle = skin;
-  ctx.fillRect(v.x + 12 * S, v.y + 2 * S, v.w - 24 * S, 26 * S);
+  } else if (shape === 'drumstack') {
+    // L2 - a warden built out of the barrels he hoards
+    drawLegs();
+    for (let i = 0; i < 2; i++) {
+      const dy = bodyTop + i * 20 * S;
+      ctx.fillStyle = flash ? '#fff' : (i ? '#8a3a24' : suit);
+      ctx.fillRect(v.x, dy, v.w, 19 * S);
+      ctx.fillStyle = flash ? '#fff' : trim;
+      ctx.fillRect(v.x, dy + 5 * S, v.w, 3 * S);
+      ctx.fillRect(v.x, dy + 12 * S, v.w, 3 * S);
+      // hazard stripe
+      ctx.fillStyle = flash ? '#fff' : '#e8c83a';
+      ctx.fillRect(v.x + v.w / 2 - 7 * S, dy + 3 * S, 14 * S, 4 * S);
+    }
+    drawArms();
+    drawFace();
+    // respirator mask
+    ctx.fillStyle = flash ? '#fff' : '#2a2a2a';
+    ctx.fillRect(v.x + 15 * S, v.y + 18 * S, v.w - 30 * S, 9 * S);
+    ctx.fillStyle = flash ? '#fff' : '#555';
+    ctx.beginPath();
+    ctx.arc(v.x + v.w / 2, v.y + 23 * S, 4 * S, 0, Math.PI * 2);
+    ctx.fill();
 
-  // hat — every polluter wears a different one
-  ctx.fillStyle = flash ? '#fff' : '#15151f';
-  if (d.n === 4 || d.n === 7) {
-    // peaked cap for the enforcers
-    ctx.fillRect(v.x + 10 * S, v.y - 1 * S, v.w - 20 * S, 7 * S);
-    ctx.fillRect(v.x + 6 * S, v.y + 4 * S, v.w - 12 * S, 4 * S);
-    ctx.fillStyle = trim;
-    ctx.fillRect(v.x + 10 * S, v.y + 1 * S, v.w - 20 * S, 3 * S);
-  } else if (d.n === 5 || d.n === 3) {
-    // hard hat for the site workers
+  } else if (shape === 'barge') {
+    // L3 - not a man at all: a squat waste barge with a funnel
+    ctx.fillStyle = suit;
+    ctx.beginPath();
+    ctx.moveTo(v.x, v.y + 22 * S);
+    ctx.lineTo(v.x + v.w, v.y + 22 * S);
+    ctx.lineTo(v.x + v.w - 9 * S, v.y + v.h);
+    ctx.lineTo(v.x + 9 * S, v.y + v.h);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = flash ? '#fff' : trim; ctx.lineWidth = 2; ctx.stroke();
+    // deck load of sludge
+    ctx.fillStyle = flash ? '#fff' : '#6a8a2a';
+    ctx.fillRect(v.x + 6 * S, v.y + 14 * S, v.w - 12 * S, 9 * S);
+    // funnel belching
+    ctx.fillStyle = flash ? '#fff' : '#2a2a2a';
+    ctx.fillRect(v.x + v.w / 2 - 7 * S, v.y - 4 * S, 14 * S, 20 * S);
+    ctx.fillStyle = flash ? '#fff' : trim;
+    ctx.fillRect(v.x + v.w / 2 - 7 * S, v.y + 1 * S, 14 * S, 4 * S);
+    // portholes as "eyes"
+    ctx.fillStyle = raging ? '#f00' : '#cfe';
+    ctx.beginPath(); ctx.arc(v.x + 20 * S, v.y + 30 * S, 5 * S, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(v.x + v.w - 20 * S, v.y + 30 * S, 5 * S, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(v.x + 20 * S, v.y + 30 * S, 5 * S, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(v.x + v.w - 20 * S, v.y + 30 * S, 5 * S, 0, Math.PI * 2); ctx.stroke();
+
+  } else if (shape === 'drone') {
+    // L4 - a security drone: no legs, it hovers
+    const cx = v.x + v.w / 2, cy = v.y + v.h / 2;
+    // rotors
+    ctx.strokeStyle = flash ? '#fff' : '#8a8a9a'; ctx.lineWidth = 2;
+    for (const sx of [-1, 1]) {
+      const rx = cx + sx * (v.w / 2 - 4 * S);
+      ctx.beginPath(); ctx.moveTo(rx, v.y + 6 * S); ctx.lineTo(rx, cy); ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(rx, v.y + 6 * S, 15 * S, 3 * S, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // chassis
+    ctx.fillStyle = suit;
+    ctx.fillRect(v.x + 6 * S, cy - 12 * S, v.w - 12 * S, 24 * S);
+    ctx.fillStyle = flash ? '#fff' : trim;
+    ctx.fillRect(v.x + 6 * S, cy - 12 * S, v.w - 12 * S, 5 * S);
+    // single tracking eye
+    ctx.fillStyle = raging ? '#f00' : '#f66';
+    ctx.beginPath(); ctx.arc(cx + look * 2, cy + 2 * S, 7 * S, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#300'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(cx + look * 2 - 2 * S, cy, 2.5 * S, 0, Math.PI * 2); ctx.fill();
+
+  } else if (shape === 'pipeworks') {
+    // L5 - a foreman wearing the outfall manifold on his back
+    drawLegs(); drawTorso(); drawArms();
+    ctx.strokeStyle = flash ? '#fff' : '#8a8a92'; ctx.lineWidth = 5 * S;
+    ctx.beginPath();
+    ctx.moveTo(v.x + 4 * S, bodyTop + 34 * S);
+    ctx.lineTo(v.x + 4 * S, bodyTop + 8 * S);
+    ctx.lineTo(v.x + v.w - 4 * S, bodyTop + 8 * S);
+    ctx.lineTo(v.x + v.w - 4 * S, bodyTop + 30 * S);
+    ctx.stroke();
+    // valve wheel on the chest
+    ctx.strokeStyle = flash ? '#fff' : trim; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(v.x + v.w / 2, bodyTop + 20 * S, 9 * S, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(v.x + v.w / 2 - 9 * S, bodyTop + 20 * S);
+    ctx.lineTo(v.x + v.w / 2 + 9 * S, bodyTop + 20 * S);
+    ctx.moveTo(v.x + v.w / 2, bodyTop + 11 * S);
+    ctx.lineTo(v.x + v.w / 2, bodyTop + 29 * S);
+    ctx.stroke();
+    drawFace();
+    // hard hat
     ctx.fillStyle = flash ? '#fff' : '#e8a83a';
     ctx.beginPath();
-    ctx.ellipse(v.x + v.w / 2, v.y + 4 * S, (v.w - 20 * S) / 2, 9 * S, 0, Math.PI, 0);
+    ctx.ellipse(v.x + v.w / 2, v.y + 4 * S, (v.w - 18 * S) / 2, 9 * S, 0, Math.PI, 0);
     ctx.fill();
-    ctx.fillRect(v.x + 8 * S, v.y + 3 * S, v.w - 16 * S, 4 * S);
+    ctx.fillRect(v.x + 7 * S, v.y + 3 * S, v.w - 14 * S, 4 * S);
+
+  } else if (shape === 'hazmat') {
+    // L6 - a sealed hazmat suit with a mercury tank
+    drawLegs(); drawTorso(); drawArms();
+    // suit seams
+    ctx.strokeStyle = flash ? '#fff' : trim; ctx.lineWidth = 2;
+    ctx.strokeRect(v.x + 3 * S, bodyTop + 3 * S, v.w - 6 * S, 34 * S);
+    // tank of mercury on the chest
+    ctx.fillStyle = flash ? '#fff' : '#c9c9d8';
+    ctx.fillRect(v.x + v.w / 2 - 8 * S, bodyTop + 10 * S, 16 * S, 20 * S);
+    ctx.fillStyle = flash ? '#fff' : '#8a8a9a';
+    ctx.fillRect(v.x + v.w / 2 - 8 * S, bodyTop + 10 * S, 16 * S, 5 * S);
+    // hood + visor instead of a face
+    ctx.fillStyle = suit;
+    ctx.fillRect(v.x + 9 * S, v.y, v.w - 18 * S, 28 * S);
+    ctx.fillStyle = raging ? 'rgba(255,60,60,0.85)' : 'rgba(150,240,180,0.85)';
+    ctx.fillRect(v.x + 14 * S, v.y + 8 * S, v.w - 28 * S, 12 * S);
+    ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 2;
+    ctx.strokeRect(v.x + 14 * S, v.y + 8 * S, v.w - 28 * S, 12 * S);
+    // glowing eyes behind the visor
+    ctx.fillStyle = raging ? '#fff' : '#2a6a3a';
+    ctx.fillRect(v.x + 18 * S + look, v.y + 12 * S, 5 * S, 4 * S);
+    ctx.fillRect(v.x + v.w - 23 * S + look, v.y + 12 * S, 5 * S, 4 * S);
+
+  } else if (shape === 'stack') {
+    // L7 - a general fused to a smokestack, chimneys on his shoulders.
+    // Drawn before the body so the stacks rise behind his head.
+    drawLegs();
+    for (const sx of [-10, v.w - 2]) {
+      ctx.fillStyle = flash ? '#fff' : '#3a3a3a';
+      ctx.fillRect(v.x + sx * S, v.y - 16 * S, 13 * S, 42 * S);
+      ctx.fillStyle = flash ? '#fff' : trim;
+      ctx.fillRect(v.x + sx * S, v.y - 16 * S, 13 * S, 4 * S);
+      // soot puffing out of the top
+      ctx.fillStyle = 'rgba(90,90,96,0.55)';
+      const puff = (Date.now() * 0.004 + sx) % 3;
+      ctx.beginPath();
+      ctx.arc(v.x + (sx + 6) * S, v.y - (20 + puff * 7) * S, (4 + puff * 2) * S, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    drawTorso(); drawArms();
+    // medals across the chest
+    ctx.fillStyle = flash ? '#fff' : '#d8c04a';
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.arc(v.x + 14 * S + i * 10 * S, bodyTop + 14 * S, 3.5 * S, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    drawFace();
+    // peaked officer's cap
+    ctx.fillStyle = flash ? '#fff' : '#15151f';
+    ctx.fillRect(v.x + 9 * S, v.y - 2 * S, v.w - 18 * S, 8 * S);
+    ctx.fillRect(v.x + 5 * S, v.y + 4 * S, v.w - 10 * S, 4 * S);
+    ctx.fillStyle = flash ? '#fff' : trim;
+    ctx.fillRect(v.x + 9 * S, v.y + 1 * S, v.w - 18 * S, 3 * S);
+
   } else {
-    // top hat for the bosses in suits
+    // L8 - the tycoon himself: pinstripe suit, top hat, cigar
+    drawLegs(); drawTorso();
+    ctx.fillStyle = flash ? '#fff' : '#e8e8e8';
+    ctx.fillRect(v.x + v.w / 2 - 9 * S, bodyTop + 2 * S, 18 * S, 34 * S);
+    ctx.fillStyle = trim;
+    ctx.beginPath();
+    ctx.moveTo(v.x + v.w / 2, bodyTop + 2 * S);
+    ctx.lineTo(v.x + v.w / 2 - 5 * S, bodyTop + 10 * S);
+    ctx.lineTo(v.x + v.w / 2, bodyTop + 32 * S);
+    ctx.lineTo(v.x + v.w / 2 + 5 * S, bodyTop + 10 * S);
+    ctx.closePath(); ctx.fill();
+    drawArms();
+    drawFace();
+    ctx.fillStyle = flash ? '#fff' : '#15151f';
     ctx.fillRect(v.x + 6 * S, v.y - 2 * S, v.w - 12 * S, 5 * S);
     ctx.fillRect(v.x + 13 * S, v.y - 18 * S, v.w - 26 * S, 17 * S);
     ctx.fillStyle = trim;
     ctx.fillRect(v.x + 13 * S, v.y - 7 * S, v.w - 26 * S, 4 * S);
+    // cigar
+    ctx.fillStyle = flash ? '#fff' : '#6b3d1a';
+    ctx.fillRect(v.x + v.w - 18 * S, v.y + 21 * S, 12 * S, 4 * S);
+    ctx.fillStyle = '#f80';
+    ctx.fillRect(v.x + v.w - 7 * S, v.y + 21 * S, 3 * S, 4 * S);
   }
 
-  // angry eyes follow Jerry
-  const look = v.facing > 0 ? 2 * S : -2 * S;
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(v.x + 17 * S, v.y + 10 * S, 8 * S, 7 * S);
-  ctx.fillRect(v.x + v.w - 25 * S, v.y + 10 * S, 8 * S, 7 * S);
-  ctx.fillStyle = raging ? '#f00' : '#000';
-  ctx.fillRect(v.x + 19 * S + look, v.y + 12 * S, 4 * S, 4 * S);
-  ctx.fillRect(v.x + v.w - 23 * S + look, v.y + 12 * S, 4 * S, 4 * S);
-  // furious brows
-  ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(v.x + 16 * S, v.y + 7 * S); ctx.lineTo(v.x + 26 * S, v.y + 11 * S);
-  ctx.moveTo(v.x + v.w - 16 * S, v.y + 7 * S); ctx.lineTo(v.x + v.w - 26 * S, v.y + 11 * S);
-  ctx.stroke();
-  // grimace
-  ctx.beginPath();
-  ctx.moveTo(v.x + 20 * S, v.y + 24 * S); ctx.lineTo(v.x + v.w - 20 * S, v.y + 24 * S);
-  ctx.stroke();
-  // cigar
-  ctx.fillStyle = flash ? '#fff' : '#6b3d1a';
-  ctx.fillRect(v.x + v.w - 18 * S, v.y + 21 * S, 12 * S, 4 * S);
-  ctx.fillStyle = '#f80';
-  ctx.fillRect(v.x + v.w - 7 * S, v.y + 21 * S, 3 * S, 4 * S);
+  // Name plate and health bar above him. Sits clear of the tallest headgear
+  // (top hat, chimneys) so the bar never overlaps the boss himself.
+  const bw = Math.max(96, v.w + 46), bx = v.x + v.w / 2 - bw / 2;
+  const by = Math.max(74, v.y - 52);      // never ride up into the HUD
 
-  // name plate and health bar above him
-  const bw = Math.max(96, v.w + 46), bx = v.x + v.w / 2 - bw / 2, by = v.y - 40;
+  // whoever he has bought out this moment, above the plate again
+  if (v.bought) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd94a';
+    ctx.font = 'bold 10px monospace';
+    ctx.fillText('◆ ' + v.bought.name, v.x + v.w / 2, by - 18);
+    ctx.textAlign = 'left';
+  }
+
   ctx.textAlign = 'center';
   ctx.fillStyle = flash ? '#fff' : trim;
   ctx.font = 'bold 11px monospace';
@@ -2959,6 +3365,63 @@ function drawVillainShots() {
       ctx.font = 'bold 13px monospace';
       ctx.fillText('$', -4, 5);
       ctx.restore();
+    } else if (s.kind === 'junk') {
+      // falling rubbish, with a shadow marking where it lands
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.beginPath();
+      ctx.ellipse(s.x, GROUND_Y + 2, s.r * 0.9, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.spin);
+      ctx.fillStyle = '#6a5a3a';
+      ctx.fillRect(-s.r, -s.r, s.r * 2, s.r * 2);
+      ctx.strokeStyle = '#3a3020'; ctx.lineWidth = 2;
+      ctx.strokeRect(-s.r, -s.r, s.r * 2, s.r * 2);
+      ctx.fillStyle = '#8a7a4a';
+      ctx.fillRect(-s.r + 3, -s.r + 3, s.r, s.r * 0.7);
+      ctx.restore();
+
+    } else if (s.kind === 'drum') {
+      // a leaking drum rolling along the floor
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.spin);
+      ctx.fillStyle = '#a83a2a';
+      ctx.fillRect(-s.r, -s.r, s.r * 2, s.r * 2);
+      ctx.fillStyle = '#e8c83a';
+      ctx.fillRect(-s.r, -s.r * 0.4, s.r * 2, s.r * 0.35);
+      ctx.strokeStyle = '#5a1a10'; ctx.lineWidth = 2;
+      ctx.strokeRect(-s.r, -s.r, s.r * 2, s.r * 2);
+      ctx.restore();
+
+    } else if (s.kind === 'jet') {
+      if (s.warn) {
+        // the pipe rattles before it blows
+        ctx.strokeStyle = 'rgba(255,200,60,' + (0.4 + Math.sin(s.spin * 4) * 0.3) + ')';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(s.x - 12, GROUND_Y - 2); ctx.lineTo(s.x + 12, GROUND_Y - 2);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = 'rgba(150,220,90,0.85)';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(210,255,150,0.7)';
+        ctx.beginPath(); ctx.arc(s.x, s.y + s.r * 0.7, s.r * 0.6, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#3a6b10'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.stroke();
+      }
+
+    } else if (s.kind === 'mercury') {
+      // heavy silver blob - splits when bombed
+      ctx.fillStyle = '#c9c9d8';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#6a6a80'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.ellipse(s.x - s.r * 0.3, s.y - s.r * 0.35, s.r * 0.3, s.r * 0.18, -0.6, 0, Math.PI * 2);
+      ctx.fill();
+
     } else if (s.kind === 'wave') {
       // ground shockwave from a slam
       ctx.strokeStyle = 'rgba(255,180,80,0.9)';
@@ -3061,9 +3524,63 @@ function drawVillainScene() {
     ctx.strokeRect(p.x, p.y, p.w, p.h);
   }
 
+  // SLUDGE TIDE floods the arena floor - drawn under everyone so you can
+  // still see where you are standing.
+  if (villain && villain.tide > 0) {
+    const t = Date.now() * 0.006;
+    ctx.fillStyle = 'rgba(110,150,40,0.75)';
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND_Y + 4);
+    for (let x = 0; x <= W; x += 20) {
+      ctx.lineTo(x, GROUND_Y - 10 + Math.sin(t + x * 0.03) * 4);
+    }
+    ctx.lineTo(W, GROUND_Y + 60); ctx.lineTo(0, GROUND_Y + 60);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(190,230,120,0.5)';
+    for (let x = 0; x <= W; x += 60) {
+      ctx.fillRect(x + Math.sin(t + x) * 6, GROUND_Y - 12, 14, 3);
+    }
+  }
+
+  // the DRONE MARSHAL's targeting beam, before and as it fires
+  if (villain && villain.laserAim) {
+    const a = 0.25 + Math.sin(Date.now() * 0.03) * 0.2;
+    ctx.strokeStyle = 'rgba(255,60,60,' + a + ')';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(villain.laserAim.x, villain.y + villain.h);
+    ctx.lineTo(villain.laserAim.x, GROUND_Y);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,60,60,' + (a + 0.2) + ')';
+    ctx.fillRect(villain.laserAim.x - 13, GROUND_Y - 3, 26, 3);
+  }
+  if (villain && villain.laserFire > 0) {
+    ctx.fillStyle = 'rgba(255,90,90,0.85)';
+    ctx.fillRect(villain.lastLaserX - 9, 0, 18, GROUND_Y);
+  }
+
   drawBossMinions();
   drawVillain();
   drawVillainShots();
+
+  // SMOG GENERAL's cloud sits on top of everything, hiding the arena
+  if (villain && villain.smog > 0) {
+    const fade = Math.min(1, villain.smog / 60);
+    const t = Date.now() * 0.0008;
+    ctx.save();
+    ctx.globalAlpha = 0.55 * fade;
+    ctx.fillStyle = '#6a6a72';
+    for (let i = 0; i < 7; i++) {
+      const cx = ((i * 137 + t * 220) % (W + 200)) - 100;
+      ctx.beginPath();
+      ctx.ellipse(cx, 120 + Math.sin(t * 3 + i) * 40, 130, 62, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 0.32 * fade;
+    ctx.fillStyle = '#55555c';
+    ctx.fillRect(0, 0, W, GROUND_Y);
+    ctx.restore();
+  }
 }
 
 function drawGoal() {
