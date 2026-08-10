@@ -355,7 +355,7 @@
 </div>
 <div id="info">
   <kbd>←</kbd> <kbd>→</kbd> move &nbsp;•&nbsp;
-  <kbd>SPACE</kbd> / <kbd>W</kbd> / <kbd>↑</kbd> jump &nbsp;•&nbsp;
+  <kbd>SPACE</kbd> / <kbd>W</kbd> / <kbd>↑</kbd> jump (press again in mid-air to double jump) &nbsp;•&nbsp;
   <kbd>X</kbd> water bomb &nbsp;•&nbsp;
   <kbd>R</kbd> restart &nbsp;•&nbsp;
   <kbd>M</kbd> mute &nbsp;•&nbsp;
@@ -1224,6 +1224,10 @@ loadSavedPlayer().then(() => fetchLeaderboard());
 // ============ CONSTANTS ============
 const GRAVITY = 0.55;
 const JUMP_POWER = -12.5;
+// The mid-air jump is slightly weaker than the first, so a double jump is a
+// recovery move rather than a way to float over the whole level.
+const DOUBLE_JUMP_POWER = 0.88;
+const MAX_JUMPS = 2;            // ground jump + one double jump, never three
 const MOVE_SPEED = 3.8;
 const GROUND_Y = 440;
 const LEVEL_END = 3200;
@@ -1257,9 +1261,9 @@ const LEVELS = [
     intro: 'Barrels roll fast down the marsh. TRIPLE SHOT throws three bombs in a spread!' },
 
   { n: 4, name: 'DRONE PATROL',    len: 3600, gaps: 5, gapW: 120, enemies: 10, speed: 1.40,
-    kinds: ['barrel', 'drone'],                    power: 'doublejump',
+    kinds: ['barrel', 'drone'],                    power: 'swift',
     sky: ['#7a86a8', '#b9a48c'], ground: 'dead',
-    intro: 'His drones guard the sky - only bombs bring them down. DOUBLE JUMP unlocked!' },
+    intro: 'His drones guard the sky - only bombs bring them down. SWIFT CURRENT makes you faster!' },
 
   { n: 5, name: 'THE PIPE WORKS',  len: 3800, gaps: 6, gapW: 125, enemies: 12, speed: 1.52,
     kinds: ['drum', 'drone', 'barrel'],            power: 'shield',
@@ -1480,29 +1484,37 @@ const jerry = {
   // One held flag per jump key. A single shared flag meant that holding W
   // swallowed a later Space press, because "some jump key is down" never
   // changed and so no new press was ever detected.
-  _jumpHeld: { ' ': false, w: false, arrowup: false }
+  _jumpHeld: { ' ': false, w: false, arrowup: false },
+  _coyote: 0
 };
 
-// The jump keys, each with its own strength. Space is the big one, so a
-// keyboard player can reach slabs the others cannot.
-const JUMP_KEYS = [
-  { key: ' ',       power: 1.18 },   // SPACE - highest
-  { key: 'w',       power: 1.00 },
-  { key: 'arrowup', power: 1.00 },
-];
+// The three jump keys are interchangeable - same height from each, so a
+// player never has to learn which one jumps higher.
+const JUMP_KEYS = [' ', 'w', 'arrowup'];
 
-// Returns the strongest jump key that was newly pressed this frame, or null.
-// Checking each key separately is what lets Space fire while W is held.
+// Walking off a ledge without jumping used to leave jumps at 0, which handed
+// the player both jumps in mid-air. Falling now spends the ground jump, so a
+// step off an edge leaves exactly the one double jump - but only after a few
+// frames of grace, the usual "coyote time", so a jump pressed just after the
+// edge still counts as a proper ground jump.
+const COYOTE_FRAMES = 6;
+function spendLedgeJump() {
+  if (jerry.onGround) { jerry._coyote = COYOTE_FRAMES; return; }
+  if (jerry._coyote > 0) jerry._coyote--;
+  else if (jerry.jumps === 0) jerry.jumps = 1;
+}
+
+// True when any jump key was newly pressed this frame. Each key keeps its own
+// held flag: a single shared flag meant holding W swallowed a later Space
+// press, because "some jump key is down" never changed back to false.
 function jumpPressed() {
-  let best = null;
-  for (const jk of JUMP_KEYS) {
-    const down = !!keys[jk.key];
-    if (down && !jerry._jumpHeld[jk.key] && (!best || jk.power > best.power)) {
-      best = jk;
-    }
-    jerry._jumpHeld[jk.key] = down;
+  let pressed = false;
+  for (const key of JUMP_KEYS) {
+    const down = !!keys[key];
+    if (down && !jerry._jumpHeld[key]) pressed = true;
+    jerry._jumpHeld[key] = down;
   }
-  return best;
+  return pressed;
 }
 
 // Applies whatever a given stage means, so every place agrees.
@@ -1525,7 +1537,7 @@ const POWER_INFO = {
   bomb:       { label: 'WATER BOMB',  blurb: 'Press [X] to throw water bombs' },
   rapid:      { label: 'RAPID FIRE',  blurb: 'Throw far more often' },
   triple:     { label: 'TRIPLE SHOT', blurb: 'Three bombs in a spread' },
-  doublejump: { label: 'DOUBLE JUMP', blurb: 'Jump again in mid-air' },
+  swift:      { label: 'SWIFT CURRENT', blurb: 'Run noticeably faster' },
   shield:     { label: 'SHIELD',      blurb: 'Absorbs one hit, then recharges' },
   pierce:     { label: 'PIERCING',    blurb: 'Bombs pass through enemies' },
   blast:      { label: 'BLAST RADIUS',blurb: 'Bigger explosions' },
@@ -1550,6 +1562,9 @@ function bombCooldownFrames() {
 }
 
 function bombRadius() { return hasPower('blast') ? 15 : 9; }
+
+// SWIFT CURRENT: a straight run-speed boost from level 4 on.
+function moveSpeed() { return hasPower('swift') ? MOVE_SPEED * 1.3 : MOVE_SPEED; }
 
 // Every throw goes through here so all levels behave the same.
 function throwBombs(speed) {
@@ -1869,16 +1884,15 @@ function updatePlaying() {
 
   // ---- input ----
   let ax = 0;
-  if (keys['arrowleft'] || keys['a']) ax = -MOVE_SPEED;
-  if (keys['arrowright'] || keys['d']) ax = MOVE_SPEED;
+  if (keys['arrowleft'] || keys['a']) ax = -moveSpeed();
+  if (keys['arrowright'] || keys['d']) ax = moveSpeed();
   jerry.vx = ax;
   if (ax !== 0) jerry.facing = Math.sign(ax);
 
-  // jump, with an extra mid-air jump once DOUBLE JUMP is unlocked
-  const jk = jumpPressed();
-  const maxJumps = hasPower('doublejump') ? 2 : 1;
-  if (jk && jerry.jumps < maxJumps) {
-    jerry.vy = JUMP_POWER * jk.power * (jerry.jumps === 0 ? 1 : 0.88);
+  // Jump, plus one mid-air double jump. MAX_JUMPS caps it at two - pressing
+  // again after that does nothing, so there is never a triple jump.
+  if (jumpPressed() && jerry.jumps < MAX_JUMPS) {
+    jerry.vy = JUMP_POWER * (jerry.jumps === 0 ? 1 : DOUBLE_JUMP_POWER);
     jerry.onGround = false;
     jerry.jumps++;
     sfx('jump');
@@ -1924,6 +1938,7 @@ function updatePlaying() {
       }
     }
   }
+  spendLedgeJump();
 
   // ---- enemies ----
   for (const e of enemies) {
@@ -2161,18 +2176,17 @@ function startVillain() {
 function updateVillain() {
   // ---- player ----
   let ax = 0;
-  if (keys['arrowleft'] || keys['a']) ax = -MOVE_SPEED;
-  if (keys['arrowright'] || keys['d']) ax = MOVE_SPEED;
+  if (keys['arrowleft'] || keys['a']) ax = -moveSpeed();
+  if (keys['arrowright'] || keys['d']) ax = moveSpeed();
   jerry.vx = ax;
   if (ax !== 0) jerry.facing = Math.sign(ax);
 
-  const jk = jumpPressed();
-  const maxJumps = hasPower('doublejump') ? 2 : 1;
-  if (jk && jerry.jumps < maxJumps) {
-    jerry.vy = JUMP_POWER * jk.power * (jerry.jumps === 0 ? 1 : 0.88);
+  if (jumpPressed() && jerry.jumps < MAX_JUMPS) {
+    jerry.vy = JUMP_POWER * (jerry.jumps === 0 ? 1 : DOUBLE_JUMP_POWER);
     jerry.onGround = false;
     jerry.jumps++;
     sfx('jump');
+    if (jerry.jumps === 2) spawnParticles(jerry.x + 14, jerry.y + jerry.h, '#cfe9ff', 8);
   }
 
   if (keys['x'] && jerry.hasBomb && !jerry._xheld) {
@@ -2206,6 +2220,7 @@ function updateVillain() {
       }
     }
   }
+  spendLedgeJump();
   if (jerry.x < 0) jerry.x = 0;
   if (jerry.x + jerry.w > W) jerry.x = W - jerry.w;
 
@@ -3342,8 +3357,8 @@ function drawHUD() {
 
 // Little chips showing which powers are active this run.
 function drawPowerStrip(x, y) {
-  const order = ['bomb', 'rapid', 'triple', 'doublejump', 'shield', 'pierce', 'blast', 'overdrive'];
-  const icons = { bomb: 'B', rapid: 'R', triple: '3', doublejump: '↑↑', shield: 'S', pierce: 'P', blast: '*', overdrive: 'OD' };
+  const order = ['bomb', 'rapid', 'triple', 'swift', 'shield', 'pierce', 'blast', 'overdrive'];
+  const icons = { bomb: 'B', rapid: 'R', triple: '3', swift: '>>', shield: 'S', pierce: 'P', blast: '*', overdrive: 'OD' };
   let cx = x;
   ctx.font = 'bold 10px monospace';
   for (const p of order) {
@@ -3970,6 +3985,7 @@ const HELP_PAGES = [
     lines: [
       ['MOVE',        'Arrow keys or A / D      ·  ◀ ▶ buttons'],
       ['JUMP',        'SPACE, W or Up arrow     ·  ▲ button'],
+      ['DOUBLE JUMP', 'Press jump again in mid-air'],
       ['WATER BOMB',  'X                        ·  BOMB button'],
       ['PAUSE',       'ESC or P                 ·  ❚❚ button'],
       ['BACK',        'ESC                      ·  ◀ BACK button'],
