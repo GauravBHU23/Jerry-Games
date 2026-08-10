@@ -1343,7 +1343,33 @@ function levelDef(n) {
 
 // ============ STATE ============
 // menu -> playing (levels 1..8) -> villain -> win
-let gameState = 'menu';
+// ============ EVENT ============
+// A promo splash shown before the menu while the event is running. Edit the
+// dates and text here; once ENDS passes, the splash stops appearing on its own
+// and the menu banner disappears with it.
+const EVENT = {
+  on: true,
+  title: 'FREE PIZZA OR BURGER',
+  line1: 'Finish LEVEL 8 and beat the Greedy Tycoon',
+  line2: 'to claim a free pizza or burger',
+  ends: '2026-08-12T23:59:59',      // last moment it is valid, local time
+  endsLabel: '12 AUGUST',
+};
+
+function eventLive() {
+  if (!EVENT.on) return false;
+  const end = new Date(EVENT.ends).getTime();
+  return !isNaN(end) && Date.now() <= end;
+}
+
+// Whole days left, so "1 DAY LEFT" reads correctly on the final day.
+function eventDaysLeft() {
+  const end = new Date(EVENT.ends).getTime();
+  return Math.max(0, Math.ceil((end - Date.now()) / 86400000));
+}
+
+let gameState = eventLive() ? 'promo' : 'menu';
+let promoShown = 0;          // frames the splash has been up
 let level = 1;             // which level is being played
 let levelData = null;      // the generated map for the current level
 let levelBanner = 0;       // frames left showing the "LEVEL n" title card
@@ -3561,6 +3587,161 @@ function drawLeaderboard() {
   ctx.textAlign = 'left';
 }
 
+// ============ EVENT SPLASH ============
+// Shown once when the game opens, while the event is running.
+function drawPromo() {
+  const t = Date.now();
+
+  // warm background so it reads as a celebration, not another game screen
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#2a1030');
+  g.addColorStop(0.55, '#7a2a3a');
+  g.addColorStop(1, '#c25a2a');
+  ctx.fillStyle = g;
+  ctx.fillRect(-VIEW_X - 2, 0, VIEW_W + 4, H);
+
+  // drifting confetti
+  for (let i = 0; i < 40; i++) {
+    const seed = i * 137.5;
+    const x = ((seed * 7) % VIEW_W) - VIEW_X;
+    const y = ((t * 0.05 + seed * 3) % (H + 40)) - 20;
+    const c = ['#ffd94a', '#ff8a4a', '#8ce0ff', '#fff'][i % 4];
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate((t * 0.002 + i) % (Math.PI * 2));
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = c;
+    ctx.fillRect(-3, -5, 6, 10);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+
+  const pulse = 1 + Math.sin(t * 0.004) * 0.03;
+  ctx.textAlign = 'center';
+
+  // ribbon
+  ctx.fillStyle = '#ffd94a';
+  ctx.font = 'bold 13px monospace';
+  ctx.fillText('★  SPECIAL EVENT  ★', W / 2, 56);
+
+  // pizza + burger, drawn rather than emoji so they match the art.
+  // Kept out to the sides so the headline does not run over them.
+  drawPizzaSlice(W / 2 - 262, 130, 40);
+  drawBurger(W / 2 + 262, 130, 40);
+
+  // headline
+  ctx.save();
+  ctx.translate(W / 2, 132);
+  ctx.scale(pulse, pulse);
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#4a1020';
+  ctx.lineWidth = 4;
+  ctx.font = 'bold 30px monospace';
+  ctx.strokeText(EVENT.title, 0, 0);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(EVENT.title, 0, 0);
+  ctx.restore();
+
+  // what you have to do
+  ctx.fillStyle = 'rgba(0,0,0,0.34)';
+  ctx.fillRect(W / 2 - 250, 186, 500, 96);
+  ctx.strokeStyle = 'rgba(255,217,74,0.7)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(W / 2 - 250, 186, 500, 96);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 14px monospace';
+  ctx.fillText(EVENT.line1, W / 2, 216);
+  ctx.fillText(EVENT.line2, W / 2, 240);
+  ctx.fillStyle = '#ffd94a';
+  ctx.font = 'bold 13px monospace';
+  ctx.fillText('OFFER VALID TILL ' + EVENT.endsLabel, W / 2, 268);
+
+  // countdown
+  const days = eventDaysLeft();
+  ctx.fillStyle = '#8ce0ff';
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText(days <= 1 ? 'LAST DAY!' : days + ' DAYS LEFT', W / 2, 302);
+
+  // fine print, so nobody reads more into it than is meant
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = '9px monospace';
+  ctx.fillText('One claim per player  ·  Winners contacted by the organisers',
+               W / 2, 326);
+
+  // continue prompt
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 16px monospace';
+  if (Math.floor(t / 500) % 2) {
+    ctx.fillText(isTouch ? '▶  TAP TO CONTINUE  ◀' : '▶  PRESS ANY KEY TO CONTINUE  ◀',
+                 W / 2, H - 40);
+  }
+  ctx.textAlign = 'left';
+}
+
+function drawPizzaSlice(cx, cy, r) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(Math.sin(Date.now() * 0.002) * 0.12);
+  // crust
+  ctx.fillStyle = '#c98a3a';
+  ctx.beginPath();
+  ctx.moveTo(0, -r);
+  ctx.lineTo(r * 0.72, r * 0.72);
+  ctx.lineTo(-r * 0.72, r * 0.72);
+  ctx.closePath();
+  ctx.fill();
+  // cheese
+  ctx.fillStyle = '#f5c34a';
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 0.82);
+  ctx.lineTo(r * 0.58, r * 0.56);
+  ctx.lineTo(-r * 0.58, r * 0.56);
+  ctx.closePath();
+  ctx.fill();
+  // pepperoni
+  ctx.fillStyle = '#c0392b';
+  [[0, -r * 0.3, 5], [-r * 0.22, r * 0.2, 4.5], [r * 0.24, r * 0.24, 4.5]]
+    .forEach(([x, y, rr]) => { ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.fill(); });
+  ctx.restore();
+}
+
+function drawBurger(cx, cy, r) {
+  ctx.save();
+  ctx.translate(cx, cy + Math.sin(Date.now() * 0.003) * 3);
+  const w = r * 1.5;
+  // top bun
+  ctx.fillStyle = '#d69a4a';
+  ctx.beginPath();
+  ctx.ellipse(0, -r * 0.34, w / 2, r * 0.44, 0, Math.PI, 0);
+  ctx.fill();
+  // sesame
+  ctx.fillStyle = '#ffe9c0';
+  [[-w * 0.2, -r * 0.5], [0, -r * 0.62], [w * 0.2, -r * 0.5]]
+    .forEach(([x, y]) => { ctx.beginPath(); ctx.ellipse(x, y, 2.5, 1.6, 0, 0, Math.PI * 2); ctx.fill(); });
+  // lettuce
+  ctx.fillStyle = '#6fbf4a';
+  ctx.fillRect(-w / 2, -r * 0.34, w, r * 0.16);
+  // patty
+  ctx.fillStyle = '#7a4a2a';
+  ctx.fillRect(-w / 2, -r * 0.18, w, r * 0.28);
+  // cheese
+  ctx.fillStyle = '#f5c34a';
+  ctx.beginPath();
+  ctx.moveTo(-w / 2, r * 0.1);
+  ctx.lineTo(w / 2, r * 0.1);
+  ctx.lineTo(w * 0.36, r * 0.28);
+  ctx.lineTo(-w * 0.36, r * 0.28);
+  ctx.closePath();
+  ctx.fill();
+  // bottom bun
+  ctx.fillStyle = '#c9883a';
+  ctx.beginPath();
+  ctx.ellipse(0, r * 0.28, w / 2, r * 0.26, 0, 0, Math.PI);
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawMenu() {
   // backgrounds are drawn across the whole view, not just the 800-wide UI box,
   // so a wide screen has no dark bars down the sides
@@ -3613,6 +3794,22 @@ function drawMenu() {
     ctx.fillStyle = '#ff8';
     ctx.font = 'bold 13px monospace';
     ctx.fillText('↻ Rotate your phone sideways for a bigger view', W/2, 178);
+  }
+
+  // event reminder, so the offer is still visible after the splash is gone
+  if (eventLive()) {
+    const bw = 400, bx = W/2 - bw/2, by = 186;
+    const glow = 0.5 + Math.sin(Date.now() * 0.004) * 0.2;
+    ctx.fillStyle = 'rgba(90,30,20,0.75)';
+    ctx.fillRect(bx, by, bw, 28);
+    ctx.strokeStyle = `rgba(255,217,74,${glow})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, bw, 28);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd94a';
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText('★ CLEAR LEVEL 8 → FREE PIZZA OR BURGER · TILL ' + EVENT.endsLabel + ' ★',
+                 W/2, by + 18);
   }
 
   // preview jerry - skipped when the menu block needs the space
@@ -3925,14 +4122,35 @@ function drawWin() {
   ctx.font = 'bold 20px monospace';
   ctx.fillText('THE RIVER IS SAVED!', W/2, 105);
 
+  // The player has just done exactly what the event asks for - say so here,
+  // where it actually means something.
+  if (eventLive()) {
+    const bw = 460, bx = W/2 - bw/2, by = 116;
+    ctx.fillStyle = 'rgba(60,20,10,0.8)';
+    ctx.fillRect(bx, by, bw, 34);
+    ctx.strokeStyle = '#ffd94a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, bw, 34);
+    ctx.fillStyle = '#ffd94a';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText('🍕 YOU QUALIFY FOR A FREE PIZZA OR BURGER! 🍔', W/2, by + 15);
+    ctx.fillStyle = '#fff';
+    ctx.font = '10px monospace';
+    ctx.fillText('Show this screen to the organisers · valid till ' + EVENT.endsLabel,
+                 W/2, by + 28);
+  }
+
+  // the banner above takes 34px, so the rest slides down when it is showing
+  const shift = eventLive() ? 34 : 0;
+
   ctx.font = '14px monospace';
   ctx.fillStyle = '#c8e8ff';
-  ctx.fillText('The greedy tycoon is finished. Fish are returning.', W/2, 135);
-  ctx.fillText('Children can drink clean water again.', W/2, 155);
+  ctx.fillText('The greedy tycoon is finished. Fish are returning.', W/2, 135 + shift);
+  ctx.fillText('Children can drink clean water again.', W/2, 155 + shift);
 
   ctx.fillStyle = '#ff8';
   ctx.font = 'bold 14px monospace';
-  ctx.fillText('★ WHAT YOU LEARNED ★', W/2, 200);
+  ctx.fillText('★ WHAT YOU LEARNED ★', W/2, 196 + shift);
 
   const facts = [
     'FILTRATION removes solid particles from wastewater',
@@ -3945,11 +4163,13 @@ function drawWin() {
   ctx.textAlign = 'left';
   ctx.fillStyle = '#fff';
   ctx.font = '13px monospace';
+  const factStep = eventLive() ? 22 : 25;   // tighten up to make room
   facts.forEach((f, i) => {
+    const fy = 222 + shift + i * factStep;
     ctx.fillStyle = '#4af';
-    ctx.fillText('◆', W/2 - 240, 230 + i * 25);
+    ctx.fillText('◆', W/2 - 240, fy);
     ctx.fillStyle = '#fff';
-    ctx.fillText(f, W/2 - 220, 230 + i * 25);
+    ctx.fillText(f, W/2 - 220, fy);
   });
 
   ctx.textAlign = 'center';
@@ -4070,6 +4290,19 @@ function menuRows() {
 // Where the menu block sits. Everything below the title has to fit above the
 // hint line, and the row count varies, so the numbers are derived rather than
 // hard-coded - otherwise unlocking level select pushes the card off-screen.
+// Any key at all continues past the splash.
+function anyKeyPressed() {
+  for (const k in keys) if (keys[k]) return true;
+  return false;
+}
+
+function dismissPromo() {
+  gameState = 'menu';
+  menuSel = 0;
+  for (const k in keys) keys[k] = false;   // do not carry the press into the menu
+  unlockAudio();
+}
+
 function menuLayout() {
   const rows = menuRows().length;
   const hasCard = !!(profile.id && profile.name);
@@ -4087,8 +4320,9 @@ function menuLayout() {
   top = Math.max(232, top);              // never ride up over the subtitle
 
   // The mascot occupies roughly 190-246; only draw it when the first row
-  // starts clear of that, rather than letting the two overlap.
-  const showMascot = (top - rowH + 10) >= 248;
+  // starts clear of that. The event banner sits in the same band, so it takes
+  // priority - the offer matters more than the decoration.
+  const showMascot = (top - rowH + 10) >= 248 && !eventLive();
 
   return { top, step, rowH, gap, cardH, showMascot,
            cardY: top + (rows - 1) * step + 10 + gap,
@@ -4378,6 +4612,7 @@ function loop() {
   playMusic(
     gameState === 'villain' ? (level >= FINAL_LEVEL ? 'villain' : 'boss')
     : gameState === 'playing' ? (level >= 6 ? 'boss' : level >= 3 ? 'level2' : 'playing')
+    : gameState === 'promo' ? 'win'      // the celebratory theme suits it
     : gameState);
 
   // the menu-only chrome: player switch and the install button
@@ -4391,7 +4626,8 @@ function loop() {
   // back arrow on every screen except the menu itself; pause only during a run
   if (backBtn) {
     backBtn.style.display =
-      (!askingName && gameState !== 'menu' && !paused) ? 'block' : 'none';
+      (!askingName && gameState !== 'menu' && gameState !== 'promo' && !paused)
+        ? 'block' : 'none';
   }
   if (pauseBtn) {
     pauseBtn.style.display = (!askingName && inRun()) ? 'flex' : 'none';
@@ -4399,7 +4635,14 @@ function loop() {
     pauseBtn.title = paused ? 'Resume (Esc)' : 'Pause (Esc / P)';
   }
 
-  if (gameState === 'menu') {
+  if (gameState === 'promo') {
+    centred(drawPromo);
+    promoShown++;
+    // ignore input for the first moment so a stray tap does not skip it
+    if (promoShown > 40 && (tapped || anyKeyPressed())) {
+      dismissPromo();
+    }
+  } else if (gameState === 'menu') {
     // rows are driven by the keydown handler and the canvas tap handler
     centred(drawMenu);
   } else if (gameState === 'help') {

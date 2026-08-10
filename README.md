@@ -143,6 +143,31 @@ curl http://localhost:3000/api/leaderboard
 | Restart | `R` | tap the screen |
 | Mute | `M` | 🔊 button |
 
+## Running a promo event
+
+A splash screen can be shown before the menu — used for the "clear Level 8,
+get a free pizza or burger" run. Edit the `EVENT` block near the top of the
+script in [index.html](index.html):
+
+```js
+const EVENT = {
+  on: true,
+  title: 'FREE PIZZA OR BURGER',
+  line1: 'Finish LEVEL 8 and beat the Greedy Tycoon',
+  line2: 'to claim a free pizza or burger',
+  ends: '2026-08-12T23:59:59',   // last valid moment, local time
+  endsLabel: '12 AUGUST',
+};
+```
+
+While it is live you get the splash on open, a banner on the menu, and a
+"you qualify" panel on the victory screen. **Once `ends` passes, all three stop
+appearing on their own** — nothing to switch off by hand. Set `on: false` to
+turn it off early.
+
+Keep brand names out of `title` unless that company has actually agreed to
+sponsor it; players will read the banner as a real offer from whoever is named.
+
 ### The menu
 
 `↑` `↓` to move, `ENTER` to pick, or just tap a row:
