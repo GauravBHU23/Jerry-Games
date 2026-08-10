@@ -9,3 +9,4 @@ media/players.csv
 media/scores.csv
 # accounts: real email addresses and password hashes - never commit these
 media/accounts.csv
+media/legacy-wins.csv
