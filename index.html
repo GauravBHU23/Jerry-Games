@@ -1245,42 +1245,42 @@ const LEVEL_END = 3200;
 //  kinds    which enemy types can appear
 //  power    what the second power block unlocks at this level
 const LEVELS = [
-  { n: 1, name: 'THE RIVERBANK',   len: 3000, gaps: 3, gapW:  90, enemies: 5,  speed: 1.05,
+  { n: 1, name: 'THE RIVERBANK',   len: 3000, gaps: 3, gapW:  95, enemies: 6,  speed: 1.10,
     kinds: ['trash'],                              power: 'bomb',
     sky: ['#6bd6ff', '#c9f2ff'], ground: 'grass',
     intro: 'Trash is choking the river. Hit ? blocks from below to grow, then again for WATER BOMBS!' },
 
-  { n: 2, name: 'THE OLD CANAL',   len: 3200, gaps: 4, gapW: 100, enemies: 7,  speed: 1.16,
+  { n: 2, name: 'THE OLD CANAL',   len: 3300, gaps: 5, gapW: 110, enemies: 9,  speed: 1.28,
     kinds: ['trash', 'drum'],                      power: 'rapid',
     sky: ['#7fc9e8', '#d8ecc9'], ground: 'grass',
     intro: 'Rusting drums leak chemicals here. RAPID BOMBS let you throw much faster!' },
 
-  { n: 3, name: 'THE DEAD MARSH',  len: 3400, gaps: 5, gapW: 110, enemies: 8,  speed: 1.28,
-    kinds: ['trash', 'barrel'],                    power: 'triple',
+  { n: 3, name: 'THE DEAD MARSH',  len: 3600, gaps: 6, gapW: 122, enemies: 12, speed: 1.46,
+    kinds: ['trash', 'barrel', 'drum'],            power: 'triple',
     sky: ['#8aa89a', '#cfc9a0'], ground: 'dead',
     intro: 'Barrels roll fast down the marsh. TRIPLE SHOT throws three bombs in a spread!' },
 
-  { n: 4, name: 'DRONE PATROL',    len: 3600, gaps: 5, gapW: 120, enemies: 10, speed: 1.40,
-    kinds: ['barrel', 'drone'],                    power: 'swift',
+  { n: 4, name: 'DRONE PATROL',    len: 3900, gaps: 7, gapW: 132, enemies: 15, speed: 1.64,
+    kinds: ['barrel', 'drone', 'trash'],           power: 'swift',
     sky: ['#7a86a8', '#b9a48c'], ground: 'dead',
     intro: 'His drones guard the sky - only bombs bring them down. SWIFT CURRENT makes you faster!' },
 
-  { n: 5, name: 'THE PIPE WORKS',  len: 3800, gaps: 6, gapW: 125, enemies: 12, speed: 1.52,
-    kinds: ['drum', 'drone', 'barrel'],            power: 'shield',
+  { n: 5, name: 'THE PIPE WORKS',  len: 4200, gaps: 8, gapW: 140, enemies: 18, speed: 1.82,
+    kinds: ['drum', 'drone', 'barrel', 'spitter'], power: 'shield',
     sky: ['#8a7a90', '#c9a08c'], ground: 'rust',
     intro: 'Pipes dump waste straight into the water. A SHIELD now absorbs one hit!' },
 
-  { n: 6, name: 'TOXIC OUTFALL',   len: 4000, gaps: 7, gapW: 130, enemies: 14, speed: 1.64,
-    kinds: ['barrel', 'drone', 'spitter'],         power: 'pierce',
+  { n: 6, name: 'TOXIC OUTFALL',   len: 4500, gaps: 9, gapW: 142, enemies: 21, speed: 2.00,
+    kinds: ['barrel', 'drone', 'spitter', 'chaser'], power: 'pierce',
     sky: ['#7a6a8a', '#b98c7a'], ground: 'rust',
     intro: 'SPITTERS shoot sludge from a distance. PIERCING BOMBS pass through enemies!' },
 
-  { n: 7, name: 'THE SMOG BELT',   len: 4200, gaps: 7, gapW: 135, enemies: 16, speed: 1.76,
+  { n: 7, name: 'THE SMOG BELT',   len: 4800, gaps: 10, gapW: 148, enemies: 24, speed: 2.18,
     kinds: ['drone', 'spitter', 'chaser'],         power: 'blast',
     sky: ['#6a5a7a', '#a87a6a'], ground: 'ash',
     intro: 'CHASERS hunt you down. BLAST RADIUS makes every bomb explode wider!' },
 
-  { n: 8, name: 'THE TYCOON TOWER',len: 4400, gaps: 8, gapW: 140, enemies: 18, speed: 1.90,
+  { n: 8, name: 'THE TYCOON TOWER',len: 5100, gaps: 11, gapW: 150, enemies: 28, speed: 2.36,
     kinds: ['spitter', 'chaser', 'drone', 'barrel'], power: 'overdrive',
     sky: ['#4a3a60', '#8a5a5a'], ground: 'ash',
     intro: 'His tower is just ahead. OVERDRIVE: maximum fire rate. Finish this!' },
@@ -1299,50 +1299,50 @@ const FINAL_LEVEL = LEVELS.length;   // 8
 //  minions   enemy type it summons (null = none)
 const BOSSES = [
   { n: 1, name: 'THE TRASH BARON', title: 'Illegal Dumping',
-    hp: 4,  gap: 110, speed: 1.6, w: 52, h: 74, color: '#4a4a3a', accent: '#7a6a2a',
-    moves: ['lob'], minions: null, minionGap: 0,
+    hp: 5, gap: 96, speed: 1.7, w: 52, h: 74, color: '#4a4a3a', accent: '#7a6a2a',
+    moves: ['lob', 'spray'], minions: null, minionGap: 0,
     taunt: 'THE TRASH BARON dumps waste for profit. Bomb him!',
     fact: 'Illegal dumping poisons rivers for decades. Report it!' },
 
   { n: 2, name: 'DRUM WARDEN', title: 'Chemical Storage',
-    hp: 5,  gap: 100, speed: 1.8, w: 54, h: 78, color: '#7a3a2a', accent: '#c04040',
-    moves: ['lob', 'spray'], minions: 'drum', minionGap: 300,
+    hp: 7, gap: 86, speed: 1.9, w: 54, h: 78, color: '#7a3a2a', accent: '#c04040',
+    moves: ['lob', 'spray', 'summon'], minions: 'drum', minionGap: 260,
     taunt: 'DRUM WARDEN hoards leaking chemical drums. Take him down!',
     fact: 'Corroded drums leak solvents straight into groundwater.' },
 
   { n: 3, name: 'SLUDGE BARGE', title: 'Waste Transport',
-    hp: 6,  gap: 92,  speed: 1.9, w: 62, h: 72, color: '#3a4a2a', accent: '#7aa83a',
-    moves: ['spray', 'slam'], minions: 'barrel', minionGap: 280,
+    hp: 9, gap: 78, speed: 2.05, w: 62, h: 72, color: '#3a4a2a', accent: '#7aa83a',
+    moves: ['spray', 'slam', 'lob'], minions: 'barrel', minionGap: 230,
     taunt: 'The SLUDGE BARGE empties its tanks into the marsh!',
     fact: 'Dumping sludge at sea was banned worldwide - but it still happens.' },
 
   { n: 4, name: 'DRONE MARSHAL', title: 'Private Security',
-    hp: 7,  gap: 84,  speed: 2.1, w: 56, h: 76, color: '#3a3a4a', accent: '#5a6a9a',
-    moves: ['lob', 'summon'], minions: 'drone', minionGap: 190,
+    hp: 11, gap: 70, speed: 2.2, w: 56, h: 76, color: '#3a3a4a', accent: '#5a6a9a',
+    moves: ['lob', 'summon', 'spray'], minions: 'drone', minionGap: 160,
     taunt: 'The DRONE MARSHAL guards the polluters. Clear the skies!',
     fact: 'Communities that monitor rivers force polluters to clean up.' },
 
   { n: 5, name: 'PIPE FOREMAN', title: 'Effluent Pipes',
-    hp: 8,  gap: 78,  speed: 2.2, w: 58, h: 80, color: '#5a4a3a', accent: '#a8763a',
-    moves: ['spray', 'slam', 'lob'], minions: 'drum', minionGap: 240,
+    hp: 13, gap: 64, speed: 2.35, w: 58, h: 80, color: '#5a4a3a', accent: '#a8763a',
+    moves: ['spray', 'slam', 'lob', 'summon'], minions: 'drum', minionGap: 200,
     taunt: 'The PIPE FOREMAN opens every outfall at once!',
     fact: 'Treated effluent must be tested before it can be released.' },
 
   { n: 6, name: 'TOXIC BARON', title: 'Heavy Metals',
-    hp: 9,  gap: 70,  speed: 2.3, w: 58, h: 82, color: '#4a2a5a', accent: '#a83ac0',
-    moves: ['spray', 'summon', 'slam'], minions: 'spitter', minionGap: 220,
+    hp: 15, gap: 58, speed: 2.5, w: 58, h: 82, color: '#4a2a5a', accent: '#a83ac0',
+    moves: ['spray', 'summon', 'slam', 'lob'], minions: 'spitter', minionGap: 180,
     taunt: 'The TOXIC BARON floods the outfall with heavy metals!',
     fact: 'Lead and mercury never break down - they build up in fish and people.' },
 
   { n: 7, name: 'SMOG GENERAL', title: 'Air & Water Emissions',
-    hp: 10, gap: 62,  speed: 2.5, w: 60, h: 84, color: '#4a4a4a', accent: '#8a8a8a',
-    moves: ['lob', 'spray', 'summon', 'slam'], minions: 'chaser', minionGap: 200,
+    hp: 17, gap: 52, speed: 2.65, w: 60, h: 84, color: '#4a4a4a', accent: '#8a8a8a',
+    moves: ['lob', 'spray', 'summon', 'slam', 'rage'], minions: 'chaser', minionGap: 165,
     taunt: 'The SMOG GENERAL blots out the sun. Fight through it!',
     fact: 'Acid rain from smokestacks acidifies lakes hundreds of miles away.' },
 
   { n: 8, name: 'THE GREEDY TYCOON', title: 'He owns them all',
-    hp: 14, gap: 52,  speed: 2.7, w: 54, h: 96, color: '#2a2a3a', accent: '#c0392b',
-    moves: ['lob', 'spray', 'summon', 'slam', 'rage'], minions: 'chaser', minionGap: 170,
+    hp: 20, gap: 44, speed: 2.85, w: 54, h: 96, color: '#2a2a3a', accent: '#c0392b',
+    moves: ['lob', 'spray', 'summon', 'slam', 'rage'], minions: 'chaser', minionGap: 140,
     taunt: 'THE GREEDY TYCOON! He owns every polluter you have beaten. End this!',
     fact: 'Holding owners accountable is how rivers actually get cleaned up.' },
 ];
@@ -1408,11 +1408,13 @@ const MAX_LIVES = 5;
 // Scales lives and enemy speed. The mode is stored with each score so the
 // leaderboard can show what a run was set to.
 const DIFFICULTIES = [
-  { id: 'easy',   name: 'EASY',   lives: 5, speed: 0.85, dmg: 0.8,
+  // EASY stays a genuine way in for a first-time player; NORMAL is meant to
+  // make you work for level 8 rather than walk there.
+  { id: 'easy',   name: 'EASY',   lives: 5, speed: 0.80, dmg: 0.8,
     blurb: 'More lives, slower enemies' },
   { id: 'normal', name: 'NORMAL', lives: 3, speed: 1.00, dmg: 1.0,
     blurb: 'The game as intended' },
-  { id: 'hard',   name: 'HARD',   lives: 2, speed: 1.25, dmg: 1.0,
+  { id: 'hard',   name: 'HARD',   lives: 2, speed: 1.35, dmg: 1.0,
     blurb: 'Fewer lives, faster enemies' },
 ];
 let difficulty = 1;                        // index into DIFFICULTIES
@@ -1659,7 +1661,7 @@ function buildLevel(n) {
 
   // --- floating brick platforms, higher and thinner as levels go up ---
   const brickCount = 5 + Math.floor(n * 0.8);
-  const brickW = Math.max(70, 130 - n * 6);
+  const brickW = Math.max(52, 126 - n * 9);   // narrower ledges later on
   for (let i = 0; i < brickCount; i++) {
     const bx = 300 + (i * (end - 500) / brickCount) + rnd() * 90;
     const by = 340 - rnd() * (90 + n * 10);
@@ -1702,11 +1704,13 @@ function buildLevel(n) {
 
   goal = { x: end - 150, y: GROUND_Y - 130, w: 40, h: 130 };
 
-  // three checkpoints on solid ground, so a death in a long level does not
-  // mean replaying the whole thing
+  // Checkpoints on solid ground, thinning out as the levels go on. Three of
+  // them everywhere meant a death cost almost nothing and every player walked
+  // to level 8; the last levels now make you hold your ground for longer.
   checkpoints = [];
-  for (let i = 1; i <= 3; i++) {
-    checkpoints.push({ x: solidXNear(Math.round((end * i) / 4)), taken: false });
+  const cpCount = n <= 2 ? 3 : n <= 5 ? 2 : 1;
+  for (let i = 1; i <= cpCount; i++) {
+    checkpoints.push({ x: solidXNear(Math.round((end * i) / (cpCount + 1))), taken: false });
   }
   checkpointX = 60;
 
