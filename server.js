@@ -15,6 +15,22 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
+// Load .env for local runs. Vercel injects real environment variables, so
+// this only matters on a developer machine - hence no dependency for it.
+(function loadDotEnv() {
+  try {
+    const file = path.join(__dirname, '.env');
+    if (!fs.existsSync(file)) return;
+    for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+      const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)$/i.exec(line);
+      if (!m || line.trim().startsWith('#')) continue;
+      const key = m[1];
+      let val = m[2].trim().replace(/^["']|["']$/g, '');
+      if (val && process.env[key] === undefined) process.env[key] = val;
+    }
+  } catch (e) { /* a bad .env must not stop the server */ }
+})();
+
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
 const MEDIA = path.join(ROOT, 'media');
@@ -28,7 +44,7 @@ const SCORES_HEADER = 'id,name,score,level,durationMs,playedAt';
 // All storage and ranking lives in lib/store.js, shared with the Vercel
 // serverless functions in api/ so both paths behave identically.
 const { backend, buildLeaderboard, playerProfile, usingPostgres,
-        signup, login, resetPassword } = require('./lib/store');
+        signup, login, resetPassword, handlePossibleWin } = require('./lib/store');
 
 // ---------- http ----------
 function sendJson(res, code, data) {
@@ -140,7 +156,9 @@ const server = http.createServer(async (req, res) => {
       if (!player) return sendJson(res, 404, { error: 'player not found' });
       await backend.addScore(player.id, player.name, body.score, body.level, body.durationMs, body.mode);
       await backend.touchPlayer(player.id);
-      return sendJson(res, 201, await playerProfile(player.id));
+      // clearing level 8 earns the winner email, sent once per account
+      const mail = await handlePossibleWin(player.id, body);
+      return sendJson(res, 201, { ...(await playerProfile(player.id)), winnerMail: mail });
     }
 
     if (pathname.startsWith('/api/')) {

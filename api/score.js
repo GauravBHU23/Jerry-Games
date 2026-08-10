@@ -1,5 +1,5 @@
 // POST /api/score  { id, score, level, durationMs } -> records one game
-const { backend, playerProfile } = require('../lib/store');
+const { backend, playerProfile, handlePossibleWin } = require('../lib/store');
 
 function readBody(req) {
   if (req.body && typeof req.body === 'object') return Promise.resolve(req.body);
@@ -31,7 +31,13 @@ module.exports = async (req, res) => {
 
     await backend.addScore(player.id, player.name, body.score, body.level, body.durationMs, body.mode);
     await backend.touchPlayer(player.id);
-    res.status(201).json(await playerProfile(player.id));
+
+    // Clearing level 8 earns the winner email. Awaited rather than left
+    // dangling, because a serverless function is frozen the moment it
+    // responds and a background send would simply never finish.
+    const mail = await handlePossibleWin(player.id, body);
+
+    res.status(201).json({ ...(await playerProfile(player.id)), winnerMail: mail });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
