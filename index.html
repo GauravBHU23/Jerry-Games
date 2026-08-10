@@ -1360,7 +1360,7 @@ function levelDef(n) {
 const EVENT = {
   on: true,
   title: 'FREE PIZZA OR BURGER',
-  line1: 'Finish LEVEL 8 and beat the Greedy Tycoon',
+  line1: 'Finish at RANK #1 on the leaderboard',
   line2: 'to claim a free pizza or burger',
   ends: '2026-08-12T23:59:59',      // last moment it is valid, local time
   endsLabel: '12 AUGUST',
@@ -1908,12 +1908,15 @@ function updatePlaying() {
     if (rectHit(jerry, p)) {
       const prevX = jerry.x - jerry.vx;
       const prevY = jerry.y - jerry.vy;
+      // A ? block pays out on any contact - from below, the side, or by
+      // landing on it. Requiring a hit from underneath meant players who
+      // approached from the wrong angle just bounced off with nothing.
+      if (!p.hit && p.type) { p.hit = true; triggerBlock(p); }
       if (prevY + jerry.h <= p.y + 1) {
         jerry.y = p.y - jerry.h; jerry.vy = 0;
         jerry.onGround = true; jerry.jumps = 0;
       } else if (prevY >= p.y + p.h - 1) {
         jerry.y = p.y + p.h; jerry.vy = 1;
-        if (!p.hit && p.type) { p.hit = true; triggerBlock(p); }
       } else if (prevX + jerry.w <= p.x + 1) {
         jerry.x = p.x - jerry.w;
       } else if (prevX >= p.x + p.w - 1) {
@@ -3498,7 +3501,15 @@ function drawLeaderboard() {
   ctx.fillText('★ LEADERBOARD ★', W / 2, 40);
   ctx.fillStyle = '#6a8fb0';
   ctx.font = '10px monospace';
-  ctx.fillText('ties are broken by the faster run', W / 2, 56);
+  // while the event runs, say what the top spot is worth
+  if (eventLive()) {
+    ctx.fillStyle = '#ffd94a';
+    ctx.font = 'bold 10px monospace';
+    ctx.fillText('🍕 RANK #1 WINS A FREE PIZZA OR BURGER · TILL ' + EVENT.endsLabel +
+                 '  ·  ties go to the faster run', W / 2, 56);
+  } else {
+    ctx.fillText('ties are broken by the faster run', W / 2, 56);
+  }
 
   // ---- your own card ----
   const cardY = 66;
@@ -3863,7 +3874,7 @@ function drawMenu() {
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffd94a';
     ctx.font = 'bold 11px monospace';
-    ctx.fillText('★ CLEAR LEVEL 8 → FREE PIZZA OR BURGER · TILL ' + EVENT.endsLabel + ' ★',
+    ctx.fillText('★ REACH RANK #1 → FREE PIZZA OR BURGER · TILL ' + EVENT.endsLabel + ' ★',
                  W/2, by + 18);
   }
 
@@ -4177,22 +4188,38 @@ function drawWin() {
   ctx.font = 'bold 20px monospace';
   ctx.fillText('THE RIVER IS SAVED!', W/2, 105);
 
-  // The player has just done exactly what the event asks for - say so here,
-  // where it actually means something.
+  // The offer goes to whoever is top of the board, so only say "you qualify"
+  // when that is actually true - otherwise show how close they are.
   if (eventLive()) {
+    const top = profile.rank === 1;
     const bw = 460, bx = W/2 - bw/2, by = 116;
-    ctx.fillStyle = 'rgba(60,20,10,0.8)';
+    ctx.fillStyle = top ? 'rgba(60,20,10,0.8)' : 'rgba(10,30,55,0.8)';
     ctx.fillRect(bx, by, bw, 34);
-    ctx.strokeStyle = '#ffd94a';
+    ctx.strokeStyle = top ? '#ffd94a' : 'rgba(140,224,255,0.6)';
     ctx.lineWidth = 2;
     ctx.strokeRect(bx, by, bw, 34);
-    ctx.fillStyle = '#ffd94a';
-    ctx.font = 'bold 13px monospace';
-    ctx.fillText('🍕 YOU QUALIFY FOR A FREE PIZZA OR BURGER! 🍔', W/2, by + 15);
-    ctx.fillStyle = '#fff';
-    ctx.font = '10px monospace';
-    ctx.fillText('Show this screen to the organisers · valid till ' + EVENT.endsLabel,
-                 W/2, by + 28);
+
+    if (top) {
+      ctx.fillStyle = '#ffd94a';
+      ctx.font = 'bold 13px monospace';
+      ctx.fillText('🍕 RANK #1 - FREE PIZZA OR BURGER IS YOURS! 🍔', W/2, by + 15);
+      ctx.fillStyle = '#fff';
+      ctx.font = '10px monospace';
+      ctx.fillText('Show this screen to the organisers · valid till ' + EVENT.endsLabel,
+                   W/2, by + 28);
+    } else {
+      const lead = leaderboard.rows[0];
+      ctx.fillStyle = '#8ce0ff';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(profile.rank
+        ? 'YOU ARE #' + profile.rank + ' - only RANK #1 wins the pizza'
+        : 'Only RANK #1 wins the free pizza or burger', W/2, by + 15);
+      ctx.fillStyle = '#cfe9ff';
+      ctx.font = '10px monospace';
+      ctx.fillText(lead
+        ? 'Top score to beat: ' + lead.score + ' by ' + lead.name
+        : 'Play again to climb the leaderboard', W/2, by + 28);
+    }
   }
 
   // the banner above takes 34px, so the rest slides down when it is showing
