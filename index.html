@@ -485,6 +485,10 @@ let tapConfirm = false;
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
   if (paused) return;      // the pause menu handles its own taps
+  // On the leaderboard a press might be the start of a scroll drag, so wait
+  // for the pointer to lift before deciding it was a tap. Latching here would
+  // let the loop consume it a frame before we know the finger moved.
+  if (gameState === 'board' && !askingName) { boardPressed = true; return; }
   tapConfirm = true;
 });
 // Block double-tap zoom / long-press menus over the play area.
@@ -759,6 +763,16 @@ const profile = {
 };
 
 const leaderboard = { rows: [], status: 'idle' };  // idle|loading|ok|offline
+
+// The ranking table scrolls, so every player can be read however many there
+// are. Geometry lives here because both the drawing and the input need it.
+const BOARD_ROW_H = 24;      // height of one row
+const BOARD_VIEW_Y = 155;    // top of the scrolling window
+const BOARD_VIEW_H = 264;    // how much of the table is visible at once
+let boardScroll = 0;         // pixels scrolled down
+let boardScrollMax = 0;      // set while drawing, from the row count
+let boardDrag = null;        // in-progress touch/mouse drag
+let boardPressed = false;    // the press that may become a tap started here
 
 const ID_KEY = 'jerry-player-id';
 const NAME_KEY = 'jerry-player-name';
@@ -4097,7 +4111,9 @@ function drawLeaderboard() {
   ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(50, 148); ctx.lineTo(tableR, 148); ctx.stroke();
 
-  const rows = leaderboard.rows.slice(0, 11);
+  // Every player is listed, not just the first eleven - the table scrolls
+  // inside a fixed window so the ones further down can still be read.
+  const rows = leaderboard.rows;
   if (!rows.length) {
     ctx.fillStyle = '#8bc';
     ctx.font = '13px monospace';
@@ -4106,10 +4122,21 @@ function drawLeaderboard() {
       : 'No scores yet. Be the first!', 56, 178);
   }
 
+  boardScrollMax = Math.max(0, rows.length * BOARD_ROW_H - BOARD_VIEW_H);
+  boardScroll = Math.max(0, Math.min(boardScrollMax, boardScroll));
+
   const MEDAL = ['#ffd94a', '#d8d8d8', '#cd8b4a'];
   const NAME_X = 108;          // names shift right to make room for the avatar
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(50, BOARD_VIEW_Y, tableR - 50, BOARD_VIEW_H);
+  ctx.clip();
+
   rows.forEach((r, i) => {
-    const y = 168 + i * 24;
+    const y = 168 + i * BOARD_ROW_H - boardScroll;
+    // skip anything scrolled out of the window
+    if (y < BOARD_VIEW_Y - BOARD_ROW_H || y > BOARD_VIEW_Y + BOARD_VIEW_H + BOARD_ROW_H) return;
     // offline rows are grouped by name, so match on either
     const me = r.id === profile.id || (!!profile.name && r.name === profile.name);
     if (me) {
@@ -4145,6 +4172,28 @@ function drawLeaderboard() {
       ctx.fillText(r.mode.toUpperCase(), 552, y);
     }
   });
+  ctx.restore();
+
+  // ---- scrollbar, only when there is more than one screenful ----
+  if (boardScrollMax > 0) {
+    const trackX = tableR - 6, trackY = BOARD_VIEW_Y, trackH = BOARD_VIEW_H;
+    ctx.fillStyle = 'rgba(74,175,255,0.14)';
+    ctx.fillRect(trackX, trackY, 5, trackH);
+    const thumbH = Math.max(28, trackH * (BOARD_VIEW_H / (rows.length * BOARD_ROW_H)));
+    const thumbY = trackY + (trackH - thumbH) * (boardScroll / boardScrollMax);
+    ctx.fillStyle = '#4af';
+    ctx.fillRect(trackX, thumbY, 5, thumbH);
+
+    // a nudge that there is more below, until you scroll
+    if (boardScroll < boardScrollMax - 1) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#8bc';
+      ctx.font = '10px monospace';
+      ctx.fillText('▼ ' + (rows.length) + ' players - scroll for more',
+                   (50 + tableR) / 2, BOARD_VIEW_Y + BOARD_VIEW_H + 14);
+      ctx.textAlign = 'left';
+    }
+  }
 
   // ---- your recent games ----
   const px = W - 196;
@@ -4967,7 +5016,7 @@ function chooseMenuItem() {
     gameState = 'help';
   } else if (row.id === 'board') {
     fetchLeaderboard();
-    gameState = 'board';
+    openBoard();
   }
 }
 
@@ -5024,7 +5073,7 @@ function goBack() {
   if (inRun()) { setPaused(!paused); return; }
   if (gameState === 'board') { gameState = 'menu'; return; }
   if (gameState === 'help' || gameState === 'levels') { gameState = 'menu'; return; }
-  if (gameState === 'win' || gameState === 'gameover') { gameState = 'board'; return; }
+  if (gameState === 'win' || gameState === 'gameover') { openBoard(); return; }
 }
 
 function choosePauseItem() {
@@ -5049,7 +5098,7 @@ function choosePauseItem() {
   } else if (item === 'LEADERBOARD') {
     setPaused(false);
     recordRun();          // quitting mid-run still counts what you scored
-    gameState = 'board';
+    openBoard();
   } else if (item === 'QUIT TO MENU') {
     setPaused(false);
     recordRun();
@@ -5118,6 +5167,17 @@ window.addEventListener('keydown', e => {
     return;
   }
 
+  // leaderboard: arrows/page keys walk the ranking table
+  if (gameState === 'board' && !askingName) {
+    if (k === 'arrowdown' || k === 's') { e.preventDefault(); scrollBoard(BOARD_ROW_H); return; }
+    if (k === 'arrowup' || k === 'w')   { e.preventDefault(); scrollBoard(-BOARD_ROW_H); return; }
+    if (k === 'pagedown')  { e.preventDefault(); scrollBoard(BOARD_VIEW_H); return; }
+    if (k === 'pageup')    { e.preventDefault(); scrollBoard(-BOARD_VIEW_H); return; }
+    if (k === 'home')      { e.preventDefault(); boardScroll = 0; return; }
+    if (k === 'end')       { e.preventDefault(); boardScroll = boardScrollMax; return; }
+    // enter/r/escape still leave the board, handled by the loop
+  }
+
   // level select grid
   if (gameState === 'levels') {
     if (k === 'arrowleft' || k === 'a') { e.preventDefault(); levelSel = Math.max(1, levelSel - 1); }
@@ -5128,6 +5188,58 @@ window.addEventListener('keydown', e => {
     return;
   }
 });
+
+function scrollBoard(dy) {
+  boardScroll = Math.max(0, Math.min(boardScrollMax, boardScroll + dy));
+}
+
+// Always open the leaderboard at the top, however you got there.
+function openBoard() {
+  gameState = 'board';
+  boardScroll = 0;
+  boardDrag = null;
+  boardPressed = false;
+}
+
+// ---- leaderboard scrolling: wheel, drag and touch ----
+canvas.addEventListener('wheel', e => {
+  if (gameState !== 'board' || askingName || boardScrollMax <= 0) return;
+  e.preventDefault();
+  scrollBoard(e.deltaY);
+}, { passive: false });
+
+// Dragging the table scrolls it. A drag must not also count as the tap that
+// leaves the board, so anything past a few pixels cancels the tap.
+canvas.addEventListener('pointerdown', e => {
+  if (gameState !== 'board' || askingName) return;
+  const r = canvas.getBoundingClientRect();
+  const gy = (e.clientY - r.top) / r.height * H;
+  if (gy < BOARD_VIEW_Y || gy > BOARD_VIEW_Y + BOARD_VIEW_H) return;
+  boardDrag = { y: e.clientY, start: boardScroll, moved: 0, id: e.pointerId };
+}, { capture: true });
+
+canvas.addEventListener('pointermove', e => {
+  if (!boardDrag || e.pointerId !== boardDrag.id) return;
+  const r = canvas.getBoundingClientRect();
+  const dy = (boardDrag.y - e.clientY) / r.height * H;
+  boardDrag.moved = Math.max(boardDrag.moved, Math.abs(dy));
+  boardScroll = Math.max(0, Math.min(boardScrollMax, boardDrag.start + dy));
+  if (boardDrag.moved > 4) e.preventDefault();
+}, { capture: true, passive: false });
+
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
+  canvas.addEventListener(ev, e => {
+    if (gameState !== 'board' || askingName) return;
+    // A press that never really moved was a tap after all, so let it through
+    // to leave the board; a drag was a scroll and must not. The press has to
+    // have started on the board too - releasing here after clicking
+    // "LEADERBOARD" on the menu would otherwise bounce straight back out.
+    const wasDrag = boardDrag && boardDrag.moved > 4;
+    if (ev === 'pointerup' && !wasDrag && boardPressed) tapConfirm = true;
+    boardDrag = null;
+    boardPressed = false;
+  }, { capture: true });
+}
 
 // Tapping a pause menu row picks it. This runs in the capture phase, before
 // the tap-to-start latch, and stops the event so choosing "Quit" cannot also
@@ -5287,11 +5399,11 @@ function loop() {
     recordRun();
     draw();
     centred(drawGameOver);
-    if (keys['r'] || tapped) { keys['r'] = false; gameState = 'board'; }
+    if (keys['r'] || tapped) { keys['r'] = false; openBoard(); }
   } else if (gameState === 'win') {
     recordRun();
     centred(drawWin);
-    if (keys['r'] || tapped) { keys['r'] = false; gameState = 'board'; }
+    if (keys['r'] || tapped) { keys['r'] = false; openBoard(); }
   }
   requestAnimationFrame(loop);
 }
