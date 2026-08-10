@@ -1467,8 +1467,33 @@ const jerry = {
   facing: 1,
   invuln: 0,
   _xheld: false,
-  _jumpHeld: false
+  // One held flag per jump key. A single shared flag meant that holding W
+  // swallowed a later Space press, because "some jump key is down" never
+  // changed and so no new press was ever detected.
+  _jumpHeld: { ' ': false, w: false, arrowup: false }
 };
+
+// The jump keys, each with its own strength. Space is the big one, so a
+// keyboard player can reach slabs the others cannot.
+const JUMP_KEYS = [
+  { key: ' ',       power: 1.18 },   // SPACE - highest
+  { key: 'w',       power: 1.00 },
+  { key: 'arrowup', power: 1.00 },
+];
+
+// Returns the strongest jump key that was newly pressed this frame, or null.
+// Checking each key separately is what lets Space fire while W is held.
+function jumpPressed() {
+  let best = null;
+  for (const jk of JUMP_KEYS) {
+    const down = !!keys[jk.key];
+    if (down && !jerry._jumpHeld[jk.key] && (!best || jk.power > best.power)) {
+      best = jk;
+    }
+    jerry._jumpHeld[jk.key] = down;
+  }
+  return best;
+}
 
 // Applies whatever a given stage means, so every place agrees.
 function setStage(n) {
@@ -1833,16 +1858,15 @@ function updatePlaying() {
   if (ax !== 0) jerry.facing = Math.sign(ax);
 
   // jump, with an extra mid-air jump once DOUBLE JUMP is unlocked
-  const jumpKey = keys[' '] || keys['w'] || keys['arrowup'];
+  const jk = jumpPressed();
   const maxJumps = hasPower('doublejump') ? 2 : 1;
-  if (jumpKey && !jerry._jumpHeld && jerry.jumps < maxJumps) {
-    jerry.vy = JUMP_POWER * (jerry.jumps === 0 ? 1 : 0.88);
+  if (jk && jerry.jumps < maxJumps) {
+    jerry.vy = JUMP_POWER * jk.power * (jerry.jumps === 0 ? 1 : 0.88);
     jerry.onGround = false;
     jerry.jumps++;
     sfx('jump');
     if (jerry.jumps === 2) spawnParticles(jerry.x + 14, jerry.y + jerry.h, '#cfe9ff', 8);
   }
-  jerry._jumpHeld = jumpKey;
 
   if (keys['x'] && jerry.hasBomb && !jerry._xheld) {
     throwBombs(9);
@@ -2122,15 +2146,14 @@ function updateVillain() {
   jerry.vx = ax;
   if (ax !== 0) jerry.facing = Math.sign(ax);
 
-  const jumpKey = keys[' '] || keys['w'] || keys['arrowup'];
+  const jk = jumpPressed();
   const maxJumps = hasPower('doublejump') ? 2 : 1;
-  if (jumpKey && !jerry._jumpHeld && jerry.jumps < maxJumps) {
-    jerry.vy = JUMP_POWER * (jerry.jumps === 0 ? 1 : 0.88);
+  if (jk && jerry.jumps < maxJumps) {
+    jerry.vy = JUMP_POWER * jk.power * (jerry.jumps === 0 ? 1 : 0.88);
     jerry.onGround = false;
     jerry.jumps++;
     sfx('jump');
   }
-  jerry._jumpHeld = jumpKey;
 
   if (keys['x'] && jerry.hasBomb && !jerry._xheld) {
     throwBombs(9);
@@ -4387,6 +4410,7 @@ function setPaused(on) {
     // Drop held keys and touch buttons - otherwise Jerry keeps running the
     // moment you resume, or a held jump fires straight away.
     for (const k of Object.keys(keys)) keys[k] = false;
+    for (const k of Object.keys(jerry._jumpHeld)) jerry._jumpHeld[k] = false;
     document.querySelectorAll('#touch .btn.active')
       .forEach(b => b.classList.remove('active'));
   } else if (pausedAt) {
