@@ -1624,14 +1624,46 @@ function eventLive() {
   return !isNaN(end) && Date.now() <= end;
 }
 
+// Once the deadline passes the contest is decided, so the splash stops asking
+// people to compete and starts announcing who won.
+function eventFinished() {
+  if (!EVENT.on) return false;
+  const end = new Date(EVENT.ends).getTime();
+  return !isNaN(end) && Date.now() > end;
+}
+
+// Whoever sits at rank #1 when the event closes. Read from the leaderboard the
+// game has already fetched, so the splash needs no extra request.
+function eventWinner() {
+  const row = leaderboard.rows && leaderboard.rows[0];
+  return row && row.name ? row : null;
+}
+
+// The winner screen is worth seeing, but not forever. It runs for a few days
+// from the first time this player sees it rather than from the deadline: if
+// nobody opens the game for a week after the event, the result should still
+// be announced when they finally do.
+const WINNER_SPLASH_DAYS = 7;
+const WINNER_SEEN_KEY = 'jerry-winner-seen';
+function winnerSplashDue() {
+  if (!eventFinished()) return false;
+  const first = Number(store.get(WINNER_SEEN_KEY)) || 0;
+  if (!first) return true;                       // never shown yet
+  return (Date.now() - first) < WINNER_SPLASH_DAYS * 86400000;
+}
+
 // Whole days left, so "1 DAY LEFT" reads correctly on the final day.
 function eventDaysLeft() {
   const end = new Date(EVENT.ends).getTime();
   return Math.max(0, Math.ceil((end - Date.now()) / 86400000));
 }
 
+// Before the deadline the splash sells the prize; for a few days after it
+// announces the winner. The winner screen waits for the leaderboard to load,
+// so it starts on the menu and switches once the rows arrive.
 let gameState = eventLive() ? 'promo' : 'menu';
 let promoShown = 0;          // frames the splash has been up
+let winnerShown = false;     // the result screen is shown once per visit
 let level = 1;             // which level is being played
 let levelData = null;      // the generated map for the current level
 let levelBanner = 0;       // frames left showing the "LEVEL n" title card
@@ -4562,6 +4594,159 @@ function drawPromo() {
   ctx.textAlign = 'left';
 }
 
+// Shown for a few days after the deadline: the contest is over, and this is
+// who took it. Reads like a trophy presentation rather than an advert.
+function drawWinner() {
+  const t = Date.now();
+  const win = eventWinner();
+
+  // deep victory sky, gold at the horizon
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#1a1038');
+  g.addColorStop(0.55, '#4a2a5a');
+  g.addColorStop(1, '#c2912a');
+  ctx.fillStyle = g;
+  ctx.fillRect(-VIEW_X - 2, 0, VIEW_W + 4, H);
+
+  // falling confetti
+  for (let i = 0; i < 46; i++) {
+    const seed = i * 137.5;
+    const x = ((seed * 7) % VIEW_W) - VIEW_X;
+    const y = ((t * 0.045 + seed * 3) % (H + 40)) - 20;
+    const c = ['#ffd94a', '#ff8a4a', '#8ce0ff', '#fff', '#9fe8c4'][i % 5];
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate((t * 0.002 + i) % (Math.PI * 2));
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = c;
+    ctx.fillRect(-3, -5, 6, 10);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'center';
+
+  // rays behind the trophy, turning slowly
+  ctx.save();
+  ctx.translate(W / 2, 150);
+  ctx.rotate(t * 0.0004);
+  for (let i = 0; i < 12; i++) {
+    ctx.rotate(Math.PI / 6);
+    ctx.fillStyle = 'rgba(255,217,74,0.10)';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(150, -22);
+    ctx.lineTo(150, 22);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  ctx.fillStyle = '#ffd94a';
+  ctx.font = 'bold 13px monospace';
+  ctx.fillText('★  EVENT CLOSED  ★', W / 2, 46);
+
+  drawTrophy(W / 2, 128, 1 + Math.sin(t * 0.004) * 0.05);
+
+  ctx.fillStyle = '#cfe9ff';
+  ctx.font = 'bold 13px monospace';
+  ctx.fillText('THE WINNER IS', W / 2, 214);
+
+  if (win) {
+    // the name, big and lit up
+    const pulse = 1 + Math.sin(t * 0.005) * 0.04;
+    ctx.save();
+    ctx.translate(W / 2, 258);
+    ctx.scale(pulse, pulse);
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#3a2008';
+    ctx.lineWidth = 5;
+    ctx.font = 'bold 40px monospace';
+    ctx.strokeText(win.name, 0, 0);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(win.name, 0, 0);
+    ctx.restore();
+
+    // their run
+    ctx.fillStyle = 'rgba(0,0,0,0.34)';
+    ctx.fillRect(W / 2 - 230, 278, 460, 46);
+    ctx.strokeStyle = 'rgba(255,217,74,0.7)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(W / 2 - 230, 278, 460, 46);
+    ctx.fillStyle = '#ffd94a';
+    ctx.font = 'bold 15px monospace';
+    ctx.fillText('SCORE ' + win.score +
+                 '   ·   ' + levelLabel(win.level) +
+                 '   ·   ' + fmtTime(win.durationMs), W / 2, 307);
+
+    ctx.fillStyle = '#9fe8c4';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText('RANK #1 · ' + EVENT.title + ' CLAIMED', W / 2, 344);
+  } else {
+    // the deadline passed with an empty board - say so plainly
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText('NO ONE CLAIMED IT', W / 2, 252);
+    ctx.fillStyle = '#cfe9ff';
+    ctx.font = '13px monospace';
+    ctx.fillText('The leaderboard was empty when the event closed.', W / 2, 284);
+  }
+
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = '10px monospace';
+  ctx.fillText('Event ended ' + EVENT.endsLabel + '  ·  the game is still open to everyone',
+               W / 2, 372);
+
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 16px monospace';
+  if (Math.floor(t / 500) % 2) {
+    ctx.fillText(isTouch ? '▶  TAP TO PLAY  ◀' : '▶  PRESS ANY KEY TO PLAY  ◀',
+                 W / 2, H - 40);
+  }
+  ctx.textAlign = 'left';
+}
+
+// A cup, drawn to match the game's art rather than an emoji.
+function drawTrophy(cx, cy, scale) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+
+  ctx.fillStyle = '#ffd94a';
+  ctx.strokeStyle = '#8a6a10';
+  ctx.lineWidth = 3;
+
+  // bowl
+  ctx.beginPath();
+  ctx.moveTo(-30, -34);
+  ctx.lineTo(30, -34);
+  ctx.lineTo(22, 6);
+  ctx.quadraticCurveTo(0, 22, -22, 6);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+
+  // handles
+  ctx.beginPath();
+  ctx.arc(-38, -20, 13, Math.PI * 0.55, Math.PI * 1.55);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(38, -20, 13, Math.PI * 1.45, Math.PI * 0.45);
+  ctx.stroke();
+
+  // stem and base
+  ctx.fillRect(-6, 6, 12, 18);
+  ctx.strokeRect(-6, 6, 12, 18);
+  ctx.fillRect(-22, 24, 44, 10);
+  ctx.strokeRect(-22, 24, 44, 10);
+
+  // shine
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.beginPath();
+  ctx.ellipse(-12, -20, 5, 11, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
 function drawPizzaSlice(cx, cy, r) {
   ctx.save();
   ctx.translate(cx, cy);
@@ -5603,7 +5788,7 @@ function loop() {
   playMusic(
     gameState === 'villain' ? (level >= FINAL_LEVEL ? 'villain' : 'boss')
     : gameState === 'playing' ? (level >= 6 ? 'boss' : level >= 3 ? 'level2' : 'playing')
-    : gameState === 'promo' ? 'win'      // the celebratory theme suits it
+    : (gameState === 'promo' || gameState === 'winner') ? 'win'   // celebratory theme
     : gameState);
 
   // the menu-only chrome: player switch and the install button
@@ -5617,7 +5802,8 @@ function loop() {
   // back arrow on every screen except the menu itself; pause only during a run
   if (backBtn) {
     backBtn.style.display =
-      (!askingName && gameState !== 'menu' && gameState !== 'promo' && !paused)
+      (!askingName && gameState !== 'menu' && gameState !== 'promo' &&
+       gameState !== 'winner' && !paused)
         ? 'block' : 'none';
   }
   if (pauseBtn) {
@@ -5626,12 +5812,31 @@ function loop() {
     pauseBtn.title = paused ? 'Resume (Esc)' : 'Pause (Esc / P)';
   }
 
+  // Once the deadline passes, announce the winner the first time the menu is
+  // reached. It waits for the leaderboard, so it cannot show an empty name.
+  if (gameState === 'menu' && !winnerShown && !askingName &&
+      winnerSplashDue() && leaderboard.status === 'ok') {
+    winnerShown = true;
+    promoShown = 0;
+    gameState = 'winner';
+    // start the few-day window from the first time it is actually seen
+    if (!store.get(WINNER_SEEN_KEY)) store.set(WINNER_SEEN_KEY, String(Date.now()));
+  }
+
   if (gameState === 'promo') {
     centred(drawPromo);
     promoShown++;
     // ignore input for the first moment so a stray tap does not skip it
     if (promoShown > 40 && (tapped || anyKeyPressed())) {
       dismissPromo();
+    }
+  } else if (gameState === 'winner') {
+    centred(drawWinner);
+    promoShown++;
+    if (promoShown > 40 && (tapped || anyKeyPressed())) {
+      keys['enter'] = false; keys[' '] = false; keys['r'] = false;
+      tapConfirm = false;
+      gameState = 'menu';
     }
   } else if (gameState === 'menu') {
     // rows are driven by the keydown handler and the canvas tap handler
