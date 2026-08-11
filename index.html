@@ -5422,7 +5422,15 @@ window.addEventListener('keydown', e => {
     if (k === 'pageup')    { e.preventDefault(); scrollBoard(-BOARD_VIEW_H); return; }
     if (k === 'home')      { e.preventDefault(); boardScroll = 0; return; }
     if (k === 'end')       { e.preventDefault(); boardScroll = boardScrollMax; return; }
-    // enter/r/escape still leave the board, handled by the loop
+    // Leaving is handled here rather than by polling in the loop. keydown
+    // fires once per real press, so the key that opened the board cannot
+    // also close it on the very next frame.
+    if (k === 'enter' || k === 'r' || k === ' ') {
+      e.preventDefault();
+      keys[k] = false;
+      gameState = 'menu';
+      return;
+    }
   }
 
   // level select grid
@@ -5446,6 +5454,10 @@ function openBoard() {
   boardScroll = 0;
   boardDrag = null;
   boardPressed = false;
+  // The click or tap that opened the board is still latched; without
+  // clearing it the loop would read it again next frame and bounce straight
+  // back to the menu.
+  tapConfirm = false;
 }
 
 // ---- leaderboard scrolling: wheel, drag and touch ----
@@ -5630,10 +5642,8 @@ function loop() {
     centred(drawLevelSelect);
   } else if (gameState === 'board') {
     centred(drawLeaderboard);
-    if (!askingName && (keys['enter'] || keys['r'] || tapped)) {
-      keys['enter'] = false; keys['r'] = false;
-      gameState = 'menu';
-    }
+    // Keys are handled in keydown; only a tap is latched for the loop.
+    if (!askingName && tapped) gameState = 'menu';
   } else if (gameState === 'playing') {
     if (!paused) updatePlaying();
     draw();
