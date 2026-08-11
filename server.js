@@ -105,6 +105,19 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { rows: rows.slice(0, limit) });
     }
 
+    // --- admin: remove a player, guarded by ADMIN_KEY ---
+    if (pathname === '/api/admin' && req.method === 'POST') {
+      const expected = process.env.ADMIN_KEY;
+      if (!expected) return sendJson(res, 503, { error: 'ADMIN_KEY is not set' });
+      const body = await readBody(req);
+      if (String(body.key || '') !== expected) return sendJson(res, 401, { error: 'wrong admin key' });
+      if (String(url.searchParams.get('action') || '') !== 'delete-player') {
+        return sendJson(res, 400, { error: 'unknown action' });
+      }
+      if (!body.id) return sendJson(res, 400, { error: 'id required' });
+      return sendJson(res, 200, { deleted: body.id, ...(await backend.deletePlayer(body.id)) });
+    }
+
     // --- accounts: signup / login / forgot-password ---
     if (pathname === '/api/auth' && req.method === 'POST') {
       const action = String(url.searchParams.get('action') || '').toLowerCase();
